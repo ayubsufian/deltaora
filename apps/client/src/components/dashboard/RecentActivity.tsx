@@ -22,7 +22,7 @@ export function RecentActivity() {
             <div key={activity.id} className="relative flex gap-4">
               {/* Timeline line */}
               {index !== activities.length - 1 && (
-                <div className="absolute left-4 top-10 bottom-[-24px] w-0.5 bg-gray-200 dark:bg-gray-800" />
+                <div className="absolute left-4 top-10 -bottom-6 w-0.5 bg-gray-200 dark:bg-gray-800" />
               )}
               
               <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 ring-4 ring-white dark:ring-gray-950">

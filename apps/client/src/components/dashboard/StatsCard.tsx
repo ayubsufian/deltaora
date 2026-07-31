@@ -14,7 +14,7 @@ interface StatsCardProps {
 export function StatsCard({ title, value, icon: Icon, trend }: StatsCardProps) {
   return (
     <Card className="overflow-hidden relative group">
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-transparent dark:from-blue-900/10 dark:to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="absolute inset-0 bg-linear-to-br from-blue-50/50 to-transparent dark:from-blue-900/10 dark:to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
       <CardContent className="p-6 relative z-10">
         <div className="flex items-center justify-between">
           <div>
