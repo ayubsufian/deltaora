@@ -1,4 +1,3 @@
-import React from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';

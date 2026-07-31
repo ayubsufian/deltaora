@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
+import { useState } from 'react';
+import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -27,7 +27,7 @@ export function MonitoredPages() {
     resolver: zodResolver(createPageSchema),
   });
 
-  const onSubmit = (data: CreatePageForm) => {
+  const onSubmit = (_data: CreatePageForm) => {
     toast.success('Page added successfully');
     setIsAddModalOpen(false);
   };
@@ -109,11 +109,11 @@ export function MonitoredPages() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="icon" title="View details" asChild>
-                        <Link to={`/pages/${page.id}`}>
+                      <Link to={`/pages/${page.id}`}>
+                        <Button variant="ghost" size="icon" title="View details">
                            <Edit2 size={16} />
-                        </Link>
-                      </Button>
+                        </Button>
+                      </Link>
                       <Button variant="ghost" size="icon" title={page.status === 'ACTIVE' ? 'Pause' : 'Resume'}>
                         {page.status === 'ACTIVE' ? <Pause size={16} /> : <Play size={16} />}
                       </Button>

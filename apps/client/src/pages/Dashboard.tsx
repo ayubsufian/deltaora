@@ -1,4 +1,3 @@
-import React from 'react';
 import { StatsCard } from '../components/dashboard/StatsCard';
 import { ChangeChart } from '../components/dashboard/ChangeChart';
 import { RecentActivity } from '../components/dashboard/RecentActivity';

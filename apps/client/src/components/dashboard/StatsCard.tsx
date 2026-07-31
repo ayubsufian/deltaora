@@ -1,4 +1,3 @@
-import React from 'react';
 import { Card, CardContent } from '../ui/Card';
 import { LucideIcon } from 'lucide-react';
 

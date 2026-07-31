@@ -1,24 +1,23 @@
-import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ArrowLeft, ExternalLink, RefreshCw, Settings } from 'lucide-react';
-import * as diff2html from 'diff2html';
-import 'diff2html/bundles/css/diff2html.min.css';
 
 // Note: diff2html provides a way to render diffs beautifully in HTML
 // We would pass the diff text from our backend here.
 
 export function PageDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id: _id } = useParams<{ id: string }>();
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/pages"><ArrowLeft size={20} /></Link>
-        </Button>
+        <Link to="/pages">
+          <Button variant="ghost" size="icon">
+            <ArrowLeft size={20} />
+          </Button>
+        </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Stripe Pricing</h2>
