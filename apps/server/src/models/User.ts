@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IUser } from '@deltaora/shared-types';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 export interface IUserDocument extends Omit<IUser, '_id'>, Document {}
 

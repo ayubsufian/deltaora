@@ -14,7 +14,7 @@
     "ioredis": "^5.4.1",
     "bullmq": "^5.8.0",
     "jsonwebtoken": "^9.0.2",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "playwright": "^1.44.1",
     "cheerio": "^1.0.0-rc.12",
     "diff": "^5.2.0",
@@ -28,6 +28,7 @@
     "swagger-ui-express": "^5.0.1",
     "dotenv": "^16.4.5",
     "cookie-parser": "^1.4.6",
+    "zod": "^3.23.8",
     "@deltaora/shared-types": "workspace:*",
     "@deltaora/validation": "workspace:*",
     "@deltaora/config": "workspace:*",
@@ -36,7 +37,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
-    "@types/bcrypt": "^5.0.2",
+    "@types/bcryptjs": "^2.4.6",
     "@types/diff": "^5.2.1",
     "@types/nodemailer": "^6.4.15",
     "@types/cors": "^2.8.17",
@@ -47,7 +48,6 @@
     "@types/node": "^22.0.0",
     "nodemon": "^3.1.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.3",
-    "zod": "^3.23.8"
+    "typescript": "^5.5.3"
   }
 }
