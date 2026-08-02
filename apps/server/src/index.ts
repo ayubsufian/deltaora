@@ -10,6 +10,8 @@ import './config/redis'; // Initialize Redis
 import routes from './routes';
 import { errorHandler } from './middleware/errorHandler';
 import { initializeWorkers } from './workers';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 
 const app = express();
 
@@ -22,6 +24,12 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
+
+// API Documentation (Swagger)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customSiteTitle: 'Deltaora API Documentation',
+}));
 
 // Routes
 app.get('/health', (req, res) => {
