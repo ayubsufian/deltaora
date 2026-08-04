@@ -7,13 +7,20 @@ import { PageStatus } from '@deltaora/shared-types';
 export const getPages = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const { category, status, importance, search } = req.query;
+    const { category, status, importance, search, startDate, endDate } = req.query;
 
     const query: any = { userId };
 
     if (category) query.category = category;
     if (status) query.status = status;
+    if (importance) query.importance = importance;
     if (search) query.title = { $regex: search, $options: 'i' };
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate as string);
+      if (endDate) query.createdAt.$lte = new Date(endDate as string);
+    }
 
     const pages = await MonitoredPage.find(query).sort({ createdAt: -1 });
     res.json(pages);
@@ -25,7 +32,7 @@ export const getPages = async (req: Request, res: Response, next: NextFunction) 
 export const createPage = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const { url, title, category, checkInterval } = req.body;
+    const { url, title, category, importance, checkInterval } = req.body;
 
     const existing = await MonitoredPage.findOne({ userId, url });
     if (existing) {
@@ -37,6 +44,7 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       url,
       title,
       category,
+      importance,
       checkInterval,
       status: PageStatus.ACTIVE,
     });

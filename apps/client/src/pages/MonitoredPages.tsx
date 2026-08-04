@@ -13,25 +13,51 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { createPageSchema } from '@deltaora/validation';
 import { z } from 'zod';
 import { Link } from 'react-router-dom';
-import { usePages, useCreatePage, useDeletePage, useTogglePageStatus } from '../hooks/useApi';
+import { usePages, useCreatePage, useDeletePage, useTogglePageStatus, useUpdatePage } from '../hooks/useApi';
 import { formatDateRelative } from '@deltaora/shared-utils';
 import toast from 'react-hot-toast';
 
+const updatePageSchema = createPageSchema.extend({
+  id: z.string(),
+});
+
 type CreatePageForm = z.infer<typeof createPageSchema>;
+type UpdatePageForm = z.infer<typeof updatePageSchema>;
 
 export function MonitoredPages() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [importanceFilter, setImportanceFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [editingPage, setEditingPage] = useState<UpdatePageForm | null>(null);
+
+  // Compute date bounds for filter
+  let startDate: string | undefined;
+  let endDate: string | undefined;
+  if (dateFilter) {
+    const end = new Date();
+    const start = new Date();
+    if (dateFilter === '24h') start.setDate(start.getDate() - 1);
+    else if (dateFilter === '7d') start.setDate(start.getDate() - 7);
+    else if (dateFilter === '30d') start.setDate(start.getDate() - 30);
+    startDate = start.toISOString();
+    endDate = end.toISOString();
+  }
 
   const { data: pages, isLoading } = usePages({
     category: categoryFilter || undefined,
     status: statusFilter || undefined,
+    importance: importanceFilter || undefined,
+    startDate,
+    endDate,
     search: searchQuery || undefined,
   });
 
   const createPage = useCreatePage();
+  const updatePage = useUpdatePage();
   const deletePage = useDeletePage();
   const toggleStatus = useTogglePageStatus();
 
@@ -48,6 +74,26 @@ export function MonitoredPages() {
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to add page');
     }
+  };
+
+  const { register: registerEdit, handleSubmit: handleSubmitEdit, reset: resetEdit, formState: { errors: editErrors } } = useForm<UpdatePageForm>({
+    resolver: zodResolver(updatePageSchema),
+  });
+
+  const onEditSubmit = async (data: UpdatePageForm) => {
+    try {
+      await updatePage.mutateAsync({ id: data.id, data: { title: data.title, url: data.url, category: data.category, importance: data.importance as any, checkInterval: data.checkInterval } });
+      toast.success('Page updated successfully');
+      setEditingPage(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to update page');
+    }
+  };
+
+  const openEditModal = (page: any) => {
+    const payload = { id: page._id, title: page.title, url: page.url, category: page.category, importance: page.importance, checkInterval: page.checkInterval };
+    setEditingPage(payload);
+    resetEdit(payload);
   };
 
   const handleDelete = async (id: string, title: string) => {
@@ -95,7 +141,7 @@ export function MonitoredPages() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Select 
               options={[
                 { label: 'All Categories', value: '' },
@@ -105,9 +151,32 @@ export function MonitoredPages() {
                 { label: 'Product', value: 'product' },
                 { label: 'Careers', value: 'careers' },
               ]} 
-              className="w-40"
+              className="w-32"
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
+            />
+            <Select 
+              options={[
+                { label: 'All Importance', value: '' },
+                { label: 'Critical', value: 'critical' },
+                { label: 'High', value: 'high' },
+                { label: 'Medium', value: 'medium' },
+                { label: 'Low', value: 'low' },
+              ]} 
+              className="w-36"
+              value={importanceFilter}
+              onChange={(e) => setImportanceFilter(e.target.value)}
+            />
+            <Select 
+              options={[
+                { label: 'Any Date', value: '' },
+                { label: 'Past 24 hours', value: '24h' },
+                { label: 'Past 7 days', value: '7d' },
+                { label: 'Past 30 days', value: '30d' },
+              ]} 
+              className="w-36"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
             />
             <Select 
               options={[
@@ -163,6 +232,9 @@ export function MonitoredPages() {
                     </td>
                     <td className="px-6 py-4">
                       <Badge variant="secondary" className="capitalize">{page.category}</Badge>
+                      <Badge variant={page.importance === 'high' || page.importance === 'critical' ? 'warning' : 'outline'} className="capitalize mt-1 ml-1 text-[10px]">
+                        {page.importance}
+                      </Badge>
                     </td>
                     <td className="px-6 py-4">
                       <Badge variant={page.status === 'active' ? 'success' : 'warning'} className="uppercase">{page.status}</Badge>
@@ -174,9 +246,12 @@ export function MonitoredPages() {
                       <div className="flex items-center justify-end gap-2">
                         <Link to={`/pages/${page._id}`}>
                           <Button variant="ghost" size="icon" title="View details">
-                             <Edit2 size={16} />
+                             <SearchIcon size={16} />
                           </Button>
                         </Link>
+                        <Button variant="ghost" size="icon" title="Edit URL" onClick={() => openEditModal(page)}>
+                           <Edit2 size={16} />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -220,12 +295,64 @@ export function MonitoredPages() {
             {...register('category')}
             error={errors.category?.message}
           />
+
+          <Select 
+            label="Importance" 
+            options={[
+              { label: 'Low', value: 'low' },
+              { label: 'Medium', value: 'medium' },
+              { label: 'High', value: 'high' },
+              { label: 'Critical', value: 'critical' },
+            ]} 
+            {...register('importance')}
+            error={errors.importance?.message}
+          />
           
           <Input label="Check Interval (minutes)" type="number" defaultValue={60} {...register('checkInterval', { valueAsNumber: true })} error={errors.checkInterval?.message} />
           
           <div className="pt-4 flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
             <Button type="submit" isLoading={createPage.isPending}>Add Page</Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!editingPage} onClose={() => setEditingPage(null)} title="Edit Monitored Page" description="Update the configuration for this URL.">
+        <form onSubmit={handleSubmitEdit(onEditSubmit)} className="space-y-4">
+          <Input type="hidden" {...registerEdit('id')} />
+          <Input label="Title" placeholder="e.g. Stripe Pricing Page" {...registerEdit('title')} error={editErrors.title?.message} />
+          <Input label="URL" type="url" placeholder="https://example.com" {...registerEdit('url')} error={editErrors.url?.message} />
+          
+          <Select 
+            label="Category" 
+            options={[
+              { label: 'General', value: 'general' },
+              { label: 'Pricing', value: 'pricing' },
+              { label: 'Policy', value: 'policy' },
+              { label: 'Product', value: 'product' },
+              { label: 'Careers', value: 'careers' },
+            ]} 
+            {...registerEdit('category')}
+            error={editErrors.category?.message}
+          />
+
+          <Select 
+            label="Importance" 
+            options={[
+              { label: 'Low', value: 'low' },
+              { label: 'Medium', value: 'medium' },
+              { label: 'High', value: 'high' },
+              { label: 'Critical', value: 'critical' },
+            ]} 
+            {...registerEdit('importance')}
+            error={editErrors.importance?.message}
+          />
+          
+          <Input label="Check Interval (minutes)" type="number" {...registerEdit('checkInterval', { valueAsNumber: true })} error={editErrors.checkInterval?.message} />
+          
+          <div className="pt-4 flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setEditingPage(null)}>Cancel</Button>
+            <Button type="submit" isLoading={updatePage.isPending}>Save Changes</Button>
           </div>
         </form>
       </Modal>

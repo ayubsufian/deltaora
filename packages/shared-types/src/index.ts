@@ -50,6 +50,7 @@ export interface IMonitoredPage {
   title: string;
   url: string;
   category: Category;
+  importance: Importance;
   checkInterval: number; // in minutes
   status: PageStatus;
   lastChecked?: Date;

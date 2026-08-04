@@ -1,30 +1,16 @@
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Spinner } from '../components/ui/Spinner';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { useDashboardStats } from '../hooks/useApi';
-
-// For now we generate sample data from the dashboard stats
-// In a full implementation, you'd have a dedicated /api/v1/stats endpoint
-function generateWeeklyData() {
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return days.map(name => ({
-    name,
-    changes: Math.floor(Math.random() * 10) + 1,
-  }));
-}
-
-function generateMonthlyData() {
-  return Array.from({ length: 4 }, (_, i) => ({
-    name: `Week ${i + 1}`,
-    changes: Math.floor(Math.random() * 30) + 5,
-    summaries: Math.floor(Math.random() * 20) + 2,
-  }));
-}
+import { useDashboardStats, useTimeseriesStats } from '../hooks/useApi';
 
 export function Statistics() {
-  const { data: stats, isLoading } = useDashboardStats();
-  const weeklyData = generateWeeklyData();
-  const monthlyData = generateMonthlyData();
+  const { data: stats, isLoading: isStatsLoading } = useDashboardStats();
+  const { data: timeseries, isLoading: isTimeseriesLoading } = useTimeseriesStats();
+
+  const isLoading = isStatsLoading || isTimeseriesLoading;
+
+  const weeklyData = timeseries?.weekly || [];
+  const monthlyData = timeseries?.monthly || [];
 
   if (isLoading) {
     return (

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Category } from '@deltaora/shared-types';
+import { Category, Importance } from '@deltaora/shared-types';
 
 export const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(50),
@@ -20,6 +20,7 @@ export const createPageSchema = z.object({
   url: z.string().url("Must be a valid URL"),
   title: z.string().min(1, "Title is required").max(100),
   category: z.nativeEnum(Category).default(Category.GENERAL),
+  importance: z.nativeEnum(Importance).default(Importance.MEDIUM),
   checkInterval: z.number().min(5).max(10080).default(60), // 5 min to 1 week
 });
 

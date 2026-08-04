@@ -25,6 +25,19 @@ export function useDashboardStats() {
   });
 }
 
+export function useTimeseriesStats() {
+  return useQuery({
+    queryKey: ['stats', 'timeseries'],
+    queryFn: async () => {
+      const { data } = await api.get('/stats/timeseries');
+      return data as {
+        weekly: Array<{ name: string; changes: number }>;
+        monthly: Array<{ name: string; changes: number; summaries: number }>;
+      };
+    },
+  });
+}
+
 // ── Monitored Pages ──
 interface MonitoredPage {
   _id: string;
@@ -32,6 +45,7 @@ interface MonitoredPage {
   url: string;
   title: string;
   category: string;
+  importance: string;
   status: string;
   checkInterval: number;
   lastChecked: string | null;
@@ -39,14 +53,17 @@ interface MonitoredPage {
   updatedAt: string;
 }
 
-export function usePages(filters?: { category?: string; status?: string; search?: string }) {
+export function usePages(filters?: { category?: string; status?: string; importance?: string; search?: string; startDate?: string; endDate?: string }) {
   return useQuery({
     queryKey: ['pages', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.category) params.set('category', filters.category);
       if (filters?.status) params.set('status', filters.status);
+      if (filters?.importance) params.set('importance', filters.importance);
       if (filters?.search) params.set('search', filters.search);
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
       const { data } = await api.get(`/pages?${params.toString()}`);
       return data as MonitoredPage[];
     },
@@ -56,9 +73,26 @@ export function usePages(filters?: { category?: string; status?: string; search?
 export function useCreatePage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { title: string; url: string; category: string; checkInterval: number }) => {
+    mutationFn: async (body: { title: string;  url: string;
+  category: string;
+  importance: string;
+  checkInterval: number; }) => {
       const { data } = await api.post('/pages', body);
       return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pages'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useUpdatePage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<MonitoredPage> }) => {
+      const res = await api.put(`/pages/${id}`, data);
+      return res.data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pages'] });
