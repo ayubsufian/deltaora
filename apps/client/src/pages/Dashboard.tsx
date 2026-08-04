@@ -2,8 +2,20 @@ import { StatsCard } from '../components/dashboard/StatsCard';
 import { ChangeChart } from '../components/dashboard/ChangeChart';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { Globe, FileDiff, Sparkles, BellRing } from 'lucide-react';
+import { useDashboardStats } from '../hooks/useApi';
+import { Spinner } from '../components/ui/Spinner';
 
 export function Dashboard() {
+  const { data: stats, isLoading } = useDashboardStats();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Spinner size={32} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
@@ -16,27 +28,23 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard 
           title="Monitored Pages" 
-          value={12} 
+          value={stats?.totalPages ?? 0} 
           icon={Globe} 
-          trend={{ value: 20, isPositive: true }} 
         />
         <StatsCard 
-          title="Changes Detected" 
-          value={84} 
+          title="Checked Today" 
+          value={stats?.checkedToday ?? 0} 
           icon={FileDiff} 
-          trend={{ value: 5, isPositive: false }} 
         />
         <StatsCard 
           title="AI Summaries" 
-          value={56} 
+          value={stats?.summariesGenerated ?? 0} 
           icon={Sparkles} 
-          trend={{ value: 12, isPositive: true }} 
         />
         <StatsCard 
-          title="Alerts Sent" 
-          value={42} 
+          title="Total Changes" 
+          value={stats?.totalChanges ?? 0} 
           icon={BellRing} 
-          trend={{ value: 2, isPositive: true }} 
         />
       </div>
 
@@ -45,7 +53,7 @@ export function Dashboard() {
           <ChangeChart />
         </div>
         <div>
-          <RecentActivity />
+          <RecentActivity notifications={stats?.latestNotifications} />
         </div>
       </div>
     </div>

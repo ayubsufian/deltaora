@@ -1,6 +1,7 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Globe, Bell, Search, BarChart3, LogOut } from 'lucide-react';
-// import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard' },
@@ -11,11 +12,14 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  // const { logout, user } = useAuth();
-  
-  // Dummy user for layout demo
-  const user = { name: 'Demo User', email: 'user@deltaora.com' };
-  const logout = () => { window.location.href = '/login'; };
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    toast.success('Logged out');
+    navigate('/login');
+  };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-20 flex w-64 flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all">
@@ -57,14 +61,14 @@ export function Sidebar() {
       <div className="border-t border-gray-200 dark:border-gray-800 p-4">
         <div className="flex items-center gap-3 px-3 py-2">
           <div className="h-9 w-9 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-blue-700 dark:text-blue-300 font-semibold">
-            {user?.name.charAt(0).toUpperCase()}
+            {user?.name?.charAt(0).toUpperCase() || '?'}
           </div>
           <div className="flex-1 overflow-hidden">
             <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{user?.name}</p>
             <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>
           </div>
           <button 
-            onClick={logout}
+            onClick={handleLogout}
             className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-300"
             title="Logout"
           >

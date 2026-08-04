@@ -6,24 +6,25 @@ import { z } from 'zod';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
+import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
 export function Register() {
   const navigate = useNavigate();
+  const { register: registerUser } = useAuth();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
   });
 
-  const onSubmit = async (_data: RegisterForm) => {
+  const onSubmit = async (data: RegisterForm) => {
     try {
-      // Mock API call
-      await new Promise(r => setTimeout(r, 1000));
+      await registerUser(data.name, data.email, data.password, data.confirmPassword);
       toast.success('Account created successfully');
       navigate('/dashboard');
-    } catch (error) {
-      toast.error('Failed to create account');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to create account');
     }
   };
 

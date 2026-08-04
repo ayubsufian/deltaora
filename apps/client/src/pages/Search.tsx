@@ -1,57 +1,92 @@
+import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
+import { Input } from '../components/ui/Input';
+import { Spinner } from '../components/ui/Spinner';
 import { Search as SearchIcon } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
+import { useSearch } from '../hooks/useApi';
 
 export function Search() {
-  const [searchParams] = useSearchParams();
-  const query = searchParams.get('q') || '';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryFromUrl = searchParams.get('q') || '';
+  const [inputValue, setInputValue] = useState(queryFromUrl);
 
-  const results = query ? [
-    { id: 1, type: 'page', title: 'Stripe Pricing', url: 'https://stripe.com/pricing', match: 'pricing' },
-    { id: 2, type: 'summary', title: 'OpenAI Terms Change', snippet: '...revised the pricing structure for API calls...', pageId: '2' }
-  ] : [];
+  const { data: results, isLoading } = useSearch(queryFromUrl);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputValue.trim()) {
+      setSearchParams({ q: inputValue.trim() });
+    }
+  };
+
+  const hasResults = results && (results.urls.length > 0 || results.summaries.length > 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Search Results</h2>
+        <h2 className="text-3xl font-bold tracking-tight">Search</h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
-          {query ? `Showing results for "${query}"` : 'Enter a query to search'}
+          Search across page titles, URLs, and AI summaries.
         </p>
       </div>
 
-      {!query ? (
+      <form onSubmit={handleSearch}>
+        <div className="relative">
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+          <Input
+            className="pl-10 text-lg py-3"
+            placeholder="Search pages, URLs, or summaries..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+          />
+        </div>
+      </form>
+
+      {!queryFromUrl ? (
         <EmptyState 
           icon={SearchIcon}
           title="Search your workspace"
           description="Search for page titles, URLs, or within AI summaries of changes."
         />
-      ) : results.length > 0 ? (
+      ) : isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Spinner size={32} />
+        </div>
+      ) : hasResults ? (
         <div className="space-y-4">
-          {results.map((result) => (
-            <Card key={`${result.type}-${result.id}`} className="hover:border-blue-500/50 transition-colors">
+          <p className="text-sm text-gray-500">
+            Showing results for "{queryFromUrl}"
+          </p>
+
+          {results!.urls.map((page) => (
+            <Card key={`page-${page._id}`} className="hover:border-blue-500/50 transition-colors">
               <CardContent className="p-4 flex gap-4">
                 <div className="pt-1">
-                  <Badge variant={result.type === 'page' ? 'default' : 'secondary'} className="uppercase">
-                    {result.type}
-                  </Badge>
+                  <Badge variant="default" className="uppercase">page</Badge>
                 </div>
                 <div>
                   <h3 className="font-semibold text-lg text-blue-600 hover:underline">
-                    <Link to={result.type === 'page' ? `/pages/${result.id}` : `/pages/${result.pageId}`}>
-                      {result.title}
-                    </Link>
+                    <Link to={`/pages/${page._id}`}>{page.title}</Link>
                   </h3>
-                  {result.type === 'page' ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{result.url}</p>
-                  ) : (
-                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                      <span className="font-medium text-gray-900 dark:text-white">Match snippet: </span>
-                      {result.snippet}
-                    </p>
-                  )}
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{page.url}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+
+          {results!.summaries.map((summary) => (
+            <Card key={`summary-${summary._id}`} className="hover:border-blue-500/50 transition-colors">
+              <CardContent className="p-4 flex gap-4">
+                <div className="pt-1">
+                  <Badge variant="secondary" className="uppercase">summary</Badge>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                    {summary.summary}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -59,7 +94,7 @@ export function Search() {
         </div>
       ) : (
         <div className="text-center py-12 text-gray-500">
-          No results found for "{query}"
+          No results found for "{queryFromUrl}"
         </div>
       )}
     </div>

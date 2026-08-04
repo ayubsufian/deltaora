@@ -6,6 +6,8 @@ import { MonitoredPages } from './pages/MonitoredPages';
 import { PageDetail } from './pages/PageDetail';
 import { Search } from './pages/Search';
 import { Settings } from './pages/Settings';
+import { Notifications } from './pages/Notifications';
+import { Statistics } from './pages/Statistics';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 
@@ -23,8 +25,8 @@ function App() {
         <Route path="/pages/:id" element={<PageDetail />} />
         <Route path="/search" element={<Search />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/notifications" element={<div className="p-8">Notifications (coming soon)</div>} />
-        <Route path="/statistics" element={<div className="p-8">Statistics (coming soon)</div>} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/statistics" element={<Statistics />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

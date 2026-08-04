@@ -6,25 +6,25 @@ import { z } from 'zod';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
+import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 type LoginForm = z.infer<typeof loginSchema>;
 
 export function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
 
-  const onSubmit = async (_data: LoginForm) => {
+  const onSubmit = async (data: LoginForm) => {
     try {
-      // Mock API call for now
-      await new Promise(r => setTimeout(r, 1000));
-      // localStorage.setItem('token', 'fake_token');
+      await login(data.email, data.password);
       toast.success('Logged in successfully');
       navigate('/dashboard');
-    } catch (error) {
-      toast.error('Invalid email or password');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Invalid email or password');
     }
   };
 
