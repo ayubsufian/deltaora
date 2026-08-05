@@ -20,6 +20,9 @@ const envSchema = z.object({
   // AI API Key
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
   
+  // Scraping Proxy
+  PROXY_URL: z.string().optional(),
+  
   // SMTP Config for Nodemailer
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),

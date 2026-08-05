@@ -23,7 +23,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
     if (!page) throw new Error('Page not found');
 
     const html = await fetchPageHTML(page.url);
-    const { content, contentHash } = extractCleanText(html);
+    const { content, contentHash } = extractCleanText(html, page.url);
 
     const latestSnapshot = await Snapshot.findOne({ pageId }).sort({ createdAt: -1 });
 
