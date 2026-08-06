@@ -13,7 +13,7 @@
     "@deltaora/shared-types": "workspace:*",
     "@deltaora/shared-utils": "workspace:*",
     "@deltaora/validation": "workspace:*",
-    "@google/generative-ai": "^0.11.4",
+    "@google/genai": "^2.16.0",
     "@mozilla/readability": "^0.6.0",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.8.0",
