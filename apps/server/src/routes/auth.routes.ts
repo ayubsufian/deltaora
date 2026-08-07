@@ -1,9 +1,21 @@
 import { Router } from 'express';
-import { register, login, refresh, logout } from '../controllers/auth.controller';
+import { register, login, refresh, logout, setupMfa, verifyMfa } from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
+import { requireAuth } from '../middleware/auth';
 import { registerSchema, loginSchema } from '@deltaora/validation';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 
 const router = Router();
+
+// 2026 Standard: Strict rate limiting to prevent brute-force attacks
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs
+  message: { error: 'Too many authentication attempts, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /**
  * @swagger
@@ -12,61 +24,13 @@ const router = Router();
  *   description: Authentication endpoints
  */
 
-/**
- * @swagger
- * /auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [name, email, password]
- *             properties:
- *               name:
- *                 type: string
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *                 minLength: 8
- *     responses:
- *       201:
- *         description: User registered successfully
- *       400:
- *         description: Validation error
- */
-router.post('/register', validate(registerSchema), register);
+router.post('/register', authLimiter, validate(registerSchema), register);
 
-/**
- * @swagger
- * /auth/login:
- *   post:
- *     summary: Login user
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [email, password]
- *             properties:
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Login successful (returns access token, sets refresh token cookie)
- *       401:
- *         description: Invalid credentials
- */
-router.post('/login', validate(loginSchema), login);
+// Accept optional mfaCode for 2FA
+const mfaLoginSchema = loginSchema.extend({
+  mfaCode: z.string().optional()
+});
+router.post('/login', authLimiter, validate(mfaLoginSchema), login);
 
 /**
  * @swagger
@@ -97,5 +61,9 @@ router.post('/refresh', refresh);
  *         description: Logged out successfully
  */
 router.post('/logout', logout);
+
+// ── MFA Routes ──
+router.post('/mfa/setup', requireAuth, setupMfa);
+router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().length(6) })), verifyMfa);
 
 export default router;

@@ -1,8 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IUser } from '@deltaora/shared-types';
-import bcrypt from 'bcryptjs';
+import * as argon2 from 'argon2';
 
-export interface IUserDocument extends Omit<IUser, '_id'>, Document {}
+export interface IUserDocument extends Omit<IUser, '_id'>, Document {
+  mfaEnabled: boolean;
+  mfaSecret?: string;
+}
 
 const UserSchema = new Schema<IUserDocument>(
   {
@@ -10,6 +13,8 @@ const UserSchema = new Schema<IUserDocument>(
     email: { type: String, required: true, unique: true },
     passwordHash: { type: String, required: true },
     role: { type: String, default: 'user' },
+    mfaEnabled: { type: Boolean, default: false },
+    mfaSecret: { type: String },
   },
   { timestamps: true }
 );
@@ -17,8 +22,7 @@ const UserSchema = new Schema<IUserDocument>(
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('passwordHash')) return next();
   try {
-    const salt = await bcrypt.genSalt(10);
-    this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
+    this.passwordHash = await argon2.hash(this.passwordHash);
     next();
   } catch (error) {
     next(error as Error);
