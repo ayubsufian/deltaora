@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getPages, createPage, getPageDetails, updatePage, deletePage, togglePageStatus } from '../controllers/pages.controller';
 import { requireAuth } from '../middleware/auth';
+import { resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { createPageSchema, updatePageSchema } from '@deltaora/validation';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import { z } from 'zod';
 const router = Router();
 
 router.use(requireAuth);
+router.use(resolveAbility);
 
 /**
  * @swagger

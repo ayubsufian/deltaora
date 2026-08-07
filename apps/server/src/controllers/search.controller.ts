@@ -3,28 +3,35 @@ import { MonitoredPage } from '../models/MonitoredPage';
 import { AISummary } from '../models/AISummary';
 import { Diff } from '../models/Diff';
 import { redis } from '../config/redis';
+import { ForbiddenError } from '@casl/ability';
 
 export const search = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.userId;
+    const workspaceId = req.workspaceId;
     const query = req.query.q as string;
 
     if (!query) {
       return res.json({ urls: [], summaries: [] });
     }
 
-    const cacheKey = `search:${userId}:${query}`;
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    // CASL check
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+
+    const cacheKey = `search:${workspaceId}:${query}`;
     const cached = await redis.get(cacheKey);
     
     if (cached) {
-      // Background: Track popular search terms
       await redis.zincrby('top-searches', 1, query);
       return res.json(JSON.parse(cached));
     }
 
-    // Find URLs
+    // Find URLs scoped to workspace
     const urls = await MonitoredPage.find({
-      userId,
+      workspaceId,
       $or: [
         { url: { $regex: query, $options: 'i' } },
         { title: { $regex: query, $options: 'i' } }
@@ -32,15 +39,12 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     }).limit(10);
 
     // Find Summaries (requires joining through Diffs and Pages)
-    // First, find all user's pages
-    const userPages = await MonitoredPage.find({ userId }).select('_id');
-    const pageIds = userPages.map(p => p._id);
+    const workspacePages = await MonitoredPage.find({ workspaceId }).select('_id');
+    const pageIds = workspacePages.map(p => p._id);
     
-    // Then find diffs for those pages
     const diffs = await Diff.find({ pageId: { $in: pageIds } }).select('_id');
     const diffIds = diffs.map(d => d._id);
 
-    // Finally search summaries for those diffs
     const summaries = await AISummary.find({
       diffId: { $in: diffIds },
       summary: { $regex: query, $options: 'i' }
@@ -55,7 +59,10 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     await redis.zincrby('top-searches', 1, query);
 
     res.json(result);
-  } catch (error) {
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
     next(error);
   }
 };

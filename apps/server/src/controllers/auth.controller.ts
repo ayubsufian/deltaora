@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { User } from '../models/User';
+import { Workspace } from '../models/Workspace';
 import * as argon2 from 'argon2';
 import { generateTokens, revokeRefreshToken, verifyRefreshToken } from '../services/auth.service';
 import { redis } from '../config/redis';
-import { OTP, verifySync, generateURI } from 'otplib';
+import { OTP } from 'otplib';
 import QRCode from 'qrcode';
 
 const otp = new OTP();
@@ -20,6 +21,16 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     const user = new User({ name, email, passwordHash: password }); // pre-save hook hashes it with argon2
     await user.save();
 
+    // 2026 Standard: Auto-provision a personal workspace on registration
+    const workspace = new Workspace({
+      name: `${name}'s Workspace`,
+      ownerId: user._id,
+      members: [{ userId: user._id, role: 'owner', joinedAt: new Date() }],
+      plan: 'free',
+      maxPages: 10,
+    });
+    await workspace.save();
+
     const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
 
     res.cookie('refreshToken', refreshToken, {
@@ -29,7 +40,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled } });
+    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled }, workspaceId: workspace.id });
   } catch (error) {
     next(error);
   }

@@ -1,11 +1,14 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IMonitoredPage, PageStatus, Category, Importance } from '@deltaora/shared-types';
 
-export interface IMonitoredPageDocument extends Omit<IMonitoredPage, '_id'>, Document {}
+export interface IMonitoredPageDocument extends Omit<IMonitoredPage, '_id'>, Document {
+  workspaceId: mongoose.Types.ObjectId;
+}
 
 const MonitoredPageSchema = new Schema<IMonitoredPageDocument>(
   {
     userId: { type: String, required: true, index: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: 'Workspace', required: true, index: true },
     title: { type: String, required: true },
     url: { type: String, required: true },
     category: { type: String, enum: Object.values(Category), default: Category.GENERAL },
@@ -16,5 +19,8 @@ const MonitoredPageSchema = new Schema<IMonitoredPageDocument>(
   },
   { timestamps: true }
 );
+
+// Compound index for workspace-scoped queries (the 2026 standard query pattern)
+MonitoredPageSchema.index({ workspaceId: 1, status: 1 });
 
 export const MonitoredPage = mongoose.model<IMonitoredPageDocument>('MonitoredPage', MonitoredPageSchema);

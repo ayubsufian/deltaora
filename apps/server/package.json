@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@casl/ability": "^7.0.1",
+    "@casl/mongoose": "^9.0.1",
     "@deltaora/config": "workspace:*",
     "@deltaora/shared-types": "workspace:*",
     "@deltaora/shared-utils": "workspace:*",
