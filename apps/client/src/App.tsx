@@ -10,6 +10,7 @@ import { Notifications } from './pages/Notifications';
 import { Statistics } from './pages/Statistics';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
+import { JoinWorkspace } from './pages/JoinWorkspace';
 
 function App() {
   return (
@@ -18,6 +19,8 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
       </Route>
+      
+      <Route path="/join" element={<JoinWorkspace />} />
       
       <Route element={<DashboardLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />

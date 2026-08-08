@@ -6,10 +6,12 @@ import dashboardRoutes from './dashboard.routes';
 import searchRoutes from './search.routes';
 import historyRoutes from './history.routes';
 import statsRoutes from './stats.routes';
+import workspacesRoutes from './workspaces.routes';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/workspaces', workspacesRoutes);
 router.use('/pages', pagesRoutes);
 router.use('/pages/:pageId', historyRoutes); // Mount nested history routes
 router.use('/notifications', notificationsRoutes);

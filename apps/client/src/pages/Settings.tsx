@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -6,8 +6,16 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/axios';
 import toast from 'react-hot-toast';
 
+interface Member {
+  id: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'editor' | 'viewer';
+  joinedAt: string;
+}
+
 export function Settings() {
-  const { user } = useAuth();
+  const { user, activeWorkspaceId } = useAuth();
   
   // MFA State
   const [isSettingUpMfa, setIsSettingUpMfa] = useState(false);
@@ -15,6 +23,27 @@ export function Settings() {
   const [qrCode, setQrCode] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [mfaEnabled, setMfaEnabled] = useState((user as any)?.mfaEnabled || false);
+
+  // Team State
+  const [members, setMembers] = useState<Member[]>([]);
+  const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
+  const [inviteToken, setInviteToken] = useState('');
+  const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
+
+  useEffect(() => {
+    if (activeWorkspaceId) {
+      fetchMembers();
+    }
+  }, [activeWorkspaceId]);
+
+  const fetchMembers = async () => {
+    try {
+      const res = await api.get(`/workspaces/${activeWorkspaceId}/members`);
+      setMembers(res.data);
+    } catch (error) {
+      console.error('Failed to fetch members');
+    }
+  };
 
   const startMfaSetup = async () => {
     try {
@@ -38,12 +67,51 @@ export function Settings() {
     }
   };
 
+  const generateInviteToken = async () => {
+    if (!activeWorkspaceId) return;
+    setIsGeneratingInvite(true);
+    try {
+      const res = await api.post(`/workspaces/${activeWorkspaceId}/invites`, { role: inviteRole });
+      setInviteToken(res.data.inviteToken);
+      toast.success('Invite link generated successfully!');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to generate invite');
+    } finally {
+      setIsGeneratingInvite(false);
+    }
+  };
+
+  const removeMember = async (userId: string) => {
+    if (!activeWorkspaceId) return;
+    if (!confirm('Are you sure you want to remove this member?')) return;
+    
+    try {
+      await api.delete(`/workspaces/${activeWorkspaceId}/members/${userId}`);
+      toast.success('Member removed');
+      fetchMembers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to remove member');
+    }
+  };
+
+  const updateRole = async (userId: string, newRole: string) => {
+    if (!activeWorkspaceId) return;
+    
+    try {
+      await api.patch(`/workspaces/${activeWorkspaceId}/members/${userId}`, { role: newRole });
+      toast.success('Role updated');
+      fetchMembers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to update role');
+    }
+  };
+
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Settings</h2>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
-          Manage your account settings and preferences.
+          Manage your account, security, and team preferences.
         </p>
       </div>
 
@@ -62,6 +130,102 @@ export function Settings() {
               <div className="pt-4 flex justify-end">
                 <Button>Save Changes</Button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <div className="hidden sm:block">
+        <div className="py-5">
+          <div className="border-t border-gray-200 dark:border-gray-800" />
+        </div>
+      </div>
+
+      {/* Team Settings Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-1">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Team Management</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Manage your workspace members and roles.
+          </p>
+        </div>
+        <div className="md:col-span-2">
+          <Card>
+            <CardContent className="space-y-6 pt-6">
+              
+              {/* Member List */}
+              <div>
+                <h4 className="font-medium text-gray-900 dark:text-white mb-4">Workspace Members</h4>
+                <div className="space-y-3">
+                  {members.map(member => (
+                    <div key={member.id} className="flex items-center justify-between p-3 border rounded-md dark:border-gray-800">
+                      <div>
+                        <div className="font-medium">{member.name}</div>
+                        <div className="text-sm text-gray-500">{member.email}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <select 
+                          value={member.role}
+                          onChange={(e) => updateRole(member.id, e.target.value)}
+                          className="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-700 p-1"
+                        >
+                          <option value="owner">Owner</option>
+                          <option value="editor">Editor</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                        <Button 
+                          variant="outline" 
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => removeMember(member.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-6">
+                <h4 className="font-medium text-gray-900 dark:text-white mb-2">Invite New Member</h4>
+                <p className="text-sm text-gray-500 mb-4">Generate a secure invite link to add a coworker to your workspace.</p>
+                
+                <div className="flex items-end gap-3">
+                  <div className="w-1/3">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                    <select 
+                      value={inviteRole}
+                      onChange={(e: any) => setInviteRole(e.target.value)}
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-900 dark:border-gray-700 h-10 px-3 border"
+                    >
+                      <option value="editor">Editor</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                  </div>
+                  <Button onClick={generateInviteToken} isLoading={isGeneratingInvite}>
+                    Generate Invite Link
+                  </Button>
+                </div>
+
+                {inviteToken && (
+                  <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-100 dark:border-blue-800">
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">Invite Link Generated (Valid for 48 hours):</p>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        readOnly 
+                        value={`${window.location.origin}/join?token=${inviteToken}`}
+                        className="w-full text-sm p-2 rounded border border-gray-300 bg-white dark:bg-gray-800" 
+                      />
+                      <Button onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/join?token=${inviteToken}`);
+                        toast.success('Copied to clipboard');
+                      }}>Copy</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
             </CardContent>
           </Card>
         </div>
@@ -133,38 +297,6 @@ export function Settings() {
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <div className="hidden sm:block">
-        <div className="py-5">
-          <div className="border-t border-gray-200 dark:border-gray-800" />
-        </div>
-      </div>
-
-      {/* Notifications Section */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-1">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Notifications</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Configure how you receive alerts.
-          </p>
-        </div>
-        <div className="md:col-span-2">
-          <Card>
-            <CardContent className="space-y-4 pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium text-gray-900 dark:text-white">Email Notifications</h4>
-                  <p className="text-sm text-gray-500">Receive summaries of changes directly to your inbox.</p>
-                </div>
-                <div className="relative inline-block w-11 h-6 align-middle select-none transition duration-200 ease-in">
-                  <input type="checkbox" name="toggle" id="toggle1" className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-blue-600 outline-none focus:outline-none focus:ring-0 focus:border-blue-600 transition-transform duration-200 ease-in-out translate-x-5" defaultChecked />
-                  <label htmlFor="toggle1" className="toggle-label block overflow-hidden h-6 rounded-full bg-blue-600 cursor-pointer"></label>
-                </div>
-              </div>
             </CardContent>
           </Card>
         </div>

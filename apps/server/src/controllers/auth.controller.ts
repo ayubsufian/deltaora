@@ -82,7 +82,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled } });
+    // Return default workspace on login
+    const workspace = await Workspace.findOne({ 'members.userId': user._id });
+
+    res.status(200).json({ 
+      accessToken, 
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled },
+      defaultWorkspaceId: workspace?.id
+    });
   } catch (error) {
     next(error);
   }
