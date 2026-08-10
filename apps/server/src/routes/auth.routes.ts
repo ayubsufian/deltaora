@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, refresh, logout, setupMfa, verifyMfa } from '../controllers/auth.controller';
+import { register, login, refresh, logout, setupMfa, verifyMfa, forgotPassword, resetPassword } from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
 import { registerSchema, loginSchema } from '@deltaora/validation';
@@ -65,5 +65,9 @@ router.post('/logout', logout);
 // ── MFA Routes ──
 router.post('/mfa/setup', requireAuth, setupMfa);
 router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().length(6) })), verifyMfa);
+
+// ── Account Recovery ──
+router.post('/forgot-password', authLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);
+router.post('/reset-password', authLimiter, validate(z.object({ id: z.string(), token: z.string(), newPassword: z.string().min(8) })), resetPassword);
 
 export default router;

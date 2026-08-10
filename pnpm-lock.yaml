@@ -128,6 +128,9 @@ importers:
       argon2:
         specifier: ^0.45.1
         version: 0.45.1
+      axios:
+        specifier: ^1.19.0
+        version: 1.19.0
       bullmq:
         specifier: ^5.8.0
         version: 5.81.3

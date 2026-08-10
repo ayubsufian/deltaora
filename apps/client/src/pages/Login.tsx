@@ -61,13 +61,23 @@ export function Login() {
               {...register('email')}
               error={errors.email?.message}
             />
-            <Input
-              label="Password"
-              type="password"
-              placeholder="••••••••"
-              {...register('password')}
-              error={errors.password?.message}
-            />
+            
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Password
+                </label>
+                <Link to="/forgot-password" className="text-sm font-medium text-blue-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                {...register('password')}
+                error={errors.password?.message}
+              />
+            </div>
           </div>
           
           {requiresMfa && (

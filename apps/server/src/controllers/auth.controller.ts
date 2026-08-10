@@ -208,3 +208,87 @@ export const verifyMfa = async (req: Request, res: Response, next: NextFunction)
     next(error);
   }
 };
+
+// ── Account Recovery ──
+
+export const forgotPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = req.body;
+    
+    const user = await User.findOne({ email });
+    if (!user) {
+      // 2026 Standard: Do not leak whether an email exists or not
+      return res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
+    }
+
+    // Import here to avoid circular dependency if email.service imports env early, or just use it directly
+    const { sendEmail } = require('../services/email.service');
+    const jwt = require('jsonwebtoken');
+    const { env } = require('../config/env');
+
+    // Generate a secure, short-lived (15 min) JWT token for reset
+    const resetToken = jwt.sign(
+      { userId: user.id },
+      env.JWT_SECRET + user.passwordHash, // Use current passwordHash in secret so token invalidates after use
+      { expiresIn: '15m' }
+    );
+
+    const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}&id=${user.id}`;
+
+    const htmlContent = `
+      <h1>Password Reset Request</h1>
+      <p>We received a request to reset your password for your Deltaora account.</p>
+      <p>Click the link below to reset your password. This link is valid for 15 minutes.</p>
+      <a href="${resetUrl}" style="padding: 10px 20px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 5px;">Reset Password</a>
+      <p>If you did not request this, please ignore this email.</p>
+    `;
+
+    await sendEmail({
+      to: user.email,
+      subject: 'Deltaora Password Reset',
+      htmlContent,
+    });
+
+    res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id, token, newPassword } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired token' });
+    }
+
+    const jwt = require('jsonwebtoken');
+    const { env } = require('../config/env');
+
+    try {
+      // Verify token using the secret combined with the CURRENT password hash
+      jwt.verify(token, env.JWT_SECRET + user.passwordHash);
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid or expired token' });
+    }
+
+    // Token is valid, update password
+    const argon2 = require('argon2');
+    user.passwordHash = await argon2.hash(newPassword);
+    
+    // Invalidate all existing sessions for security
+    const { redis } = require('../config/redis');
+    const keys = await redis.keys(`refresh_token:${user.id}:*`);
+    if (keys.length > 0) {
+      await redis.del(keys);
+    }
+
+    await user.save();
+
+    res.json({ message: 'Password has been successfully reset. You may now log in.' });
+  } catch (error) {
+    next(error);
+  }
+};

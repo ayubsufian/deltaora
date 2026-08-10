@@ -23,11 +23,8 @@ const envSchema = z.object({
   // Scraping Proxy
   PROXY_URL: z.string().optional(),
   
-  // SMTP Config for Nodemailer
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.string().optional(),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
+  // Brevo Email
+  BREVO_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
 });
 

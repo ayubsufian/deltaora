@@ -1,33 +1,44 @@
-import nodemailer from 'nodemailer';
+import axios from 'axios';
 import { env } from '../config/env';
 
-const transporter = nodemailer.createTransport({
-  host: env.SMTP_HOST || 'localhost',
-  port: Number(env.SMTP_PORT) || 1025,
-  secure: Number(env.SMTP_PORT) === 465,
-  auth: (env.SMTP_USER && env.SMTP_PASS) ? {
-    user: env.SMTP_USER,
-    pass: env.SMTP_PASS,
-  } : undefined,
-});
+interface SendEmailOptions {
+  to: string;
+  subject: string;
+  htmlContent: string;
+}
 
-export const sendNotificationEmail = async (to: string, pageTitle: string, summary: string) => {
-  const mailOptions = {
-    from: env.EMAIL_FROM || '"Deltaora" <noreply@deltaora.com>',
-    to,
-    subject: `Changes Detected: ${pageTitle}`,
-    html: `
-      <h2>Changes detected on monitored page: ${pageTitle}</h2>
-      <p><strong>Summary of changes:</strong></p>
-      <p>${summary}</p>
-      <hr>
-      <p><a href="https://deltaora.com/dashboard">View full diff on Deltaora</a></p>
-    `,
-  };
+/**
+ * Service to send emails using Brevo (formerly Sendinblue) v3 API.
+ * Uses native axios instead of heavy SDKs for 2026 enterprise standard.
+ */
+export const sendEmail = async ({ to, subject, htmlContent }: SendEmailOptions) => {
+  if (!env.BREVO_API_KEY) {
+    console.warn('\n[DEV] No BREVO_API_KEY found. Mocking email send:');
+    console.warn(`[DEV] To: ${to}`);
+    console.warn(`[DEV] Subject: ${subject}`);
+    console.warn(`[DEV] HTML Content: \n${htmlContent}\n`);
+    return;
+  }
 
   try {
-    await transporter.sendMail(mailOptions);
-  } catch (error) {
-    console.error(`Failed to send email to ${to}:`, error);
+    await axios.post(
+      'https://api.brevo.com/v3/smtp/email',
+      {
+        sender: { email: env.EMAIL_FROM || 'noreply@deltaora.com', name: 'Deltaora' },
+        to: [{ email: to }],
+        subject,
+        htmlContent,
+      },
+      {
+        headers: {
+          'api-key': env.BREVO_API_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      }
+    );
+  } catch (error: any) {
+    console.error('Failed to send email via Brevo:', error.response?.data || error.message);
+    throw new Error('Failed to send email');
   }
 };

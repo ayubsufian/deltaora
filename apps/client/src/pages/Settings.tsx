@@ -14,6 +14,15 @@ interface Member {
   joinedAt: string;
 }
 
+interface AuditLog {
+  _id: string;
+  actorId: { name: string; email: string };
+  action: string;
+  createdAt: string;
+  metadata?: any;
+  ipAddress?: string;
+}
+
 export function Settings() {
   const { user, activeWorkspaceId } = useAuth();
   
@@ -29,12 +38,25 @@ export function Settings() {
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
   const [inviteToken, setInviteToken] = useState('');
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
+  
+  // Audit Logs State
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
     if (activeWorkspaceId) {
       fetchMembers();
+      fetchAuditLogs();
     }
   }, [activeWorkspaceId]);
+
+  const fetchAuditLogs = async () => {
+    try {
+      const res = await api.get(`/workspaces/${activeWorkspaceId}/audit-logs`);
+      setAuditLogs(res.data);
+    } catch (error) {
+      // Ignore if user is not owner
+    }
+  };
 
   const fetchMembers = async () => {
     try {
@@ -301,6 +323,58 @@ export function Settings() {
           </Card>
         </div>
       </div>
+      
+      {/* SOC2 Audit Logs Section - Only visible if there are logs (owner) */}
+      {auditLogs.length > 0 && (
+        <>
+          <div className="hidden sm:block">
+            <div className="py-5">
+              <div className="border-t border-gray-200 dark:border-gray-800" />
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">Audit Logs</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Security and compliance trail for this workspace.
+              </p>
+            </div>
+            <div className="md:col-span-2">
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-800 dark:text-gray-400">
+                        <tr>
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3">Actor</th>
+                          <th className="px-4 py-3">Action</th>
+                          <th className="px-4 py-3">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {auditLogs.map((log) => (
+                          <tr key={log._id} className="border-b dark:border-gray-700">
+                            <td className="px-4 py-3 whitespace-nowrap text-gray-500">{new Date(log.createdAt).toLocaleString()}</td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-gray-900 dark:text-white">{log.actorId?.name || 'System'}</div>
+                            </td>
+                            <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">{log.action}</td>
+                            <td className="px-4 py-3 text-gray-500 text-xs truncate max-w-xs">
+                              {JSON.stringify(log.metadata || {})}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

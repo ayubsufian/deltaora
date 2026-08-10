@@ -5,6 +5,7 @@ import { Diff } from '../models/Diff';
 import { Workspace } from '../models/Workspace';
 import { PageStatus } from '@deltaora/shared-types';
 import { ForbiddenError } from '@casl/ability';
+import { logAuditEvent } from '../services/audit.service';
 
 export const getPages = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -83,6 +84,16 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
     });
 
     await page.save();
+    
+    // Log Audit Event
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: userId,
+      action: 'page.created',
+      resourceId: page.id,
+      metadata: { url, title },
+      req
+    });
 
     res.status(201).json(page);
   } catch (error: unknown) {
@@ -158,6 +169,16 @@ export const deletePage = async (req: Request, res: Response, next: NextFunction
     if (!page) {
       return res.status(404).json({ error: 'Page not found' });
     }
+    
+    // Log Audit Event
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: req.user!.userId,
+      action: 'page.deleted',
+      resourceId: id,
+      metadata: { url: page.url, title: page.title },
+      req
+    });
 
     res.json({ message: 'Page deleted successfully' });
   } catch (error: unknown) {

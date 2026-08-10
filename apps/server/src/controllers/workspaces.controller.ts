@@ -5,6 +5,8 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { ForbiddenError } from '@casl/ability';
 import mongoose from 'mongoose';
+import { logAuditEvent } from '../services/audit.service';
+import { AuditLog } from '../models/AuditLog';
 
 export const getMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -106,6 +108,15 @@ export const joinWorkspace = async (req: Request, res: Response, next: NextFunct
     });
 
     await workspace.save();
+    
+    // Log Audit Event
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: userId,
+      action: 'workspace.joined',
+      metadata: { role, method: 'invite_link' },
+      req
+    });
 
     res.json({ message: 'Successfully joined workspace', workspaceId });
   } catch (error) {
@@ -149,8 +160,19 @@ export const updateMemberRole = async (req: Request, res: Response, next: NextFu
       return res.status(404).json({ error: 'User is not a member of this workspace' });
     }
 
+    const previousRole = workspace.members[memberIndex].role;
     workspace.members[memberIndex].role = role;
     await workspace.save();
+    
+    // Log Audit Event
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: req.user!.userId,
+      action: 'role.changed',
+      resourceId: userId,
+      metadata: { previousRole, newRole: role },
+      req
+    });
 
     res.json({ message: 'Member role updated successfully' });
   } catch (error: unknown) {
@@ -196,8 +218,43 @@ export const removeMember = async (req: Request, res: Response, next: NextFuncti
 
     workspace.members = workspace.members.filter(m => m.userId.toString() !== userId);
     await workspace.save();
+    
+    // Log Audit Event
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: requesterId,
+      action: requesterId === userId ? 'workspace.left' : 'member.removed',
+      resourceId: userId,
+      metadata: { role: memberToRemove.role },
+      req
+    });
 
     res.json({ message: 'Member removed successfully' });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const getAuditLogs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    // Only owners should see audit logs in a strict SOC2 environment
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const logs = await AuditLog.find({ workspaceId })
+      .sort({ createdAt: -1 })
+      .populate('actorId', 'name email')
+      .limit(100); // Pagination in a real app
+
+    res.json(logs);
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });

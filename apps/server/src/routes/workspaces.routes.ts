@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getMembers, generateInvite, joinWorkspace, updateMemberRole, removeMember } from '../controllers/workspaces.controller';
+import { getMembers, generateInvite, joinWorkspace, updateMemberRole, removeMember, getAuditLogs } from '../controllers/workspaces.controller';
 import { requireAuth } from '../middleware/auth';
 import { resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
@@ -16,6 +16,7 @@ router.post('/join', validate(z.object({ inviteToken: z.string() })), joinWorksp
 router.use(resolveAbility);
 
 router.get('/:id/members', getMembers);
+router.get('/:id/audit-logs', getAuditLogs);
 
 router.post(
   '/:id/invites',
