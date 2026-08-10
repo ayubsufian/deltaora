@@ -7,6 +7,8 @@ import { ForbiddenError } from '@casl/ability';
 import mongoose from 'mongoose';
 import { logAuditEvent } from '../services/audit.service';
 import { AuditLog } from '../models/AuditLog';
+import { sendEmail } from '../services/email.service';
+import { workspaceInviteEmail } from '../utils/emailTemplates';
 
 export const getMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -43,7 +45,7 @@ export const getMembers = async (req: Request, res: Response, next: NextFunction
 export const generateInvite = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workspaceId = req.workspaceId;
-    const { role } = req.body; // 'editor' | 'viewer'
+    const { role, email } = req.body; // 'editor' | 'viewer', optional email
 
     if (!workspaceId) {
       return res.status(400).json({ error: 'No workspace context' });
@@ -64,7 +66,36 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
       { expiresIn: '48h' }
     );
 
-    res.json({ inviteToken, expiresIn: '48h' });
+    const joinUrl = `http://localhost:5173/join?token=${inviteToken}`;
+
+    // 2026 Standard: If an email is provided, automatically send the invite
+    if (email) {
+      const inviter = await User.findById(req.user!.userId);
+      const workspace = await Workspace.findById(workspaceId);
+
+      await sendEmail({
+        to: email,
+        subject: `You've been invited to ${workspace?.name || 'a workspace'} on Deltaora`,
+        htmlContent: workspaceInviteEmail(
+          inviter?.name || 'A team member',
+          workspace?.name || 'a workspace',
+          joinUrl
+        ),
+      });
+
+      // Log audit event for the email invite
+      await logAuditEvent({
+        workspaceId: workspaceId as string,
+        actorId: req.user!.userId,
+        action: 'member.invited',
+        metadata: { email, role, method: 'email' },
+        req,
+      });
+
+      return res.json({ inviteToken, expiresIn: '48h', emailSent: true });
+    }
+
+    res.json({ inviteToken, expiresIn: '48h', emailSent: false });
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
@@ -72,6 +103,7 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
     next(error);
   }
 };
+
 
 export const joinWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {

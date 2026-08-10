@@ -2,8 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Workspace } from '../models/Workspace';
 import * as argon2 from 'argon2';
+import jwt from 'jsonwebtoken';
 import { generateTokens, revokeRefreshToken, verifyRefreshToken } from '../services/auth.service';
 import { redis } from '../config/redis';
+import { env } from '../config/env';
+import { sendEmail } from '../services/email.service';
+import { welcomeEmail, passwordResetEmail } from '../utils/emailTemplates';
 import { OTP } from 'otplib';
 import QRCode from 'qrcode';
 
@@ -39,6 +43,13 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
+
+    // 2026 Standard: Send welcome email (fire-and-forget)
+    sendEmail({
+      to: email,
+      subject: 'Welcome to Deltaora!',
+      htmlContent: welcomeEmail(name),
+    }).catch(err => console.error('Failed to send welcome email:', err));
 
     res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled }, workspaceId: workspace.id });
   } catch (error) {
@@ -221,11 +232,6 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       return res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
     }
 
-    // Import here to avoid circular dependency if email.service imports env early, or just use it directly
-    const { sendEmail } = require('../services/email.service');
-    const jwt = require('jsonwebtoken');
-    const { env } = require('../config/env');
-
     // Generate a secure, short-lived (15 min) JWT token for reset
     const resetToken = jwt.sign(
       { userId: user.id },
@@ -235,18 +241,10 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
     const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}&id=${user.id}`;
 
-    const htmlContent = `
-      <h1>Password Reset Request</h1>
-      <p>We received a request to reset your password for your Deltaora account.</p>
-      <p>Click the link below to reset your password. This link is valid for 15 minutes.</p>
-      <a href="${resetUrl}" style="padding: 10px 20px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 5px;">Reset Password</a>
-      <p>If you did not request this, please ignore this email.</p>
-    `;
-
     await sendEmail({
       to: user.email,
-      subject: 'Deltaora Password Reset',
-      htmlContent,
+      subject: 'Deltaora — Reset Your Password',
+      htmlContent: passwordResetEmail(resetUrl),
     });
 
     res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
@@ -264,9 +262,6 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ error: 'Invalid or expired token' });
     }
 
-    const jwt = require('jsonwebtoken');
-    const { env } = require('../config/env');
-
     try {
       // Verify token using the secret combined with the CURRENT password hash
       jwt.verify(token, env.JWT_SECRET + user.passwordHash);
@@ -275,11 +270,9 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     }
 
     // Token is valid, update password
-    const argon2 = require('argon2');
     user.passwordHash = await argon2.hash(newPassword);
     
     // Invalidate all existing sessions for security
-    const { redis } = require('../config/redis');
     const keys = await redis.keys(`refresh_token:${user.id}:*`);
     if (keys.length > 0) {
       await redis.del(keys);
@@ -292,3 +285,4 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     next(error);
   }
 };
+

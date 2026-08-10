@@ -36,18 +36,45 @@ export function Settings() {
   // Team State
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
+  const [inviteEmail, setInviteEmail] = useState('');
   const [inviteToken, setInviteToken] = useState('');
   const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
   
   // Audit Logs State
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
+  // Email Preferences State
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [marketingEnabled, setMarketingEnabled] = useState(false);
+
   useEffect(() => {
     if (activeWorkspaceId) {
       fetchMembers();
       fetchAuditLogs();
     }
+    fetchEmailPreferences();
   }, [activeWorkspaceId]);
+
+  const fetchEmailPreferences = async () => {
+    try {
+      const res = await api.get('/users/me/preferences');
+      setNotificationsEnabled(res.data.emailPreferences?.notifications ?? true);
+      setMarketingEnabled(res.data.emailPreferences?.marketing ?? false);
+    } catch (error) {
+      // Ignore
+    }
+  };
+
+  const togglePreference = async (key: 'notifications' | 'marketing', value: boolean) => {
+    try {
+      await api.patch('/users/me/preferences', { [key]: value });
+      if (key === 'notifications') setNotificationsEnabled(value);
+      if (key === 'marketing') setMarketingEnabled(value);
+      toast.success('Preference updated');
+    } catch (error: any) {
+      toast.error('Failed to update preference');
+    }
+  };
 
   const fetchAuditLogs = async () => {
     try {
@@ -93,9 +120,18 @@ export function Settings() {
     if (!activeWorkspaceId) return;
     setIsGeneratingInvite(true);
     try {
-      const res = await api.post(`/workspaces/${activeWorkspaceId}/invites`, { role: inviteRole });
+      const payload: any = { role: inviteRole };
+      if (inviteEmail.trim()) {
+        payload.email = inviteEmail.trim();
+      }
+      const res = await api.post(`/workspaces/${activeWorkspaceId}/invites`, payload);
       setInviteToken(res.data.inviteToken);
-      toast.success('Invite link generated successfully!');
+      if (res.data.emailSent) {
+        toast.success(`Invite email sent to ${inviteEmail}`);
+        setInviteEmail('');
+      } else {
+        toast.success('Invite link generated successfully!');
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to generate invite');
     } finally {
@@ -210,23 +246,32 @@ export function Settings() {
 
               <div className="border-t border-gray-200 dark:border-gray-800 pt-6">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">Invite New Member</h4>
-                <p className="text-sm text-gray-500 mb-4">Generate a secure invite link to add a coworker to your workspace.</p>
+                <p className="text-sm text-gray-500 mb-4">Enter a coworker's email to send them an invite, or generate a link to share manually.</p>
                 
-                <div className="flex items-end gap-3">
-                  <div className="w-1/3">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
-                    <select 
-                      value={inviteRole}
-                      onChange={(e: any) => setInviteRole(e.target.value)}
-                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-900 dark:border-gray-700 h-10 px-3 border"
-                    >
-                      <option value="editor">Editor</option>
-                      <option value="viewer">Viewer</option>
-                    </select>
+                <div className="flex flex-col gap-3">
+                  <Input
+                    label="Invitee Email (optional)"
+                    type="email"
+                    placeholder="coworker@company.com"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                  />
+                  <div className="flex items-end gap-3">
+                    <div className="w-1/3">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Role</label>
+                      <select 
+                        value={inviteRole}
+                        onChange={(e: any) => setInviteRole(e.target.value)}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-900 dark:border-gray-700 h-10 px-3 border"
+                      >
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    </div>
+                    <Button onClick={generateInviteToken} isLoading={isGeneratingInvite}>
+                      {inviteEmail.trim() ? 'Send Invite Email' : 'Generate Invite Link'}
+                    </Button>
                   </div>
-                  <Button onClick={generateInviteToken} isLoading={isGeneratingInvite}>
-                    Generate Invite Link
-                  </Button>
                 </div>
 
                 {inviteToken && (
@@ -319,6 +364,59 @@ export function Settings() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <div className="hidden sm:block">
+        <div className="py-5">
+          <div className="border-t border-gray-200 dark:border-gray-800" />
+        </div>
+      </div>
+
+      {/* Email Preferences Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-1">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Notifications</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Control which emails you receive from Deltaora.
+          </p>
+        </div>
+        <div className="md:col-span-2">
+          <Card>
+            <CardContent className="space-y-4 pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white">Page Change Alerts</h4>
+                  <p className="text-sm text-gray-500">Receive emails when changes are detected on your monitored pages.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={notificationsEnabled}
+                  onClick={() => togglePreference('notifications', !notificationsEnabled)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${notificationsEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${notificationsEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white">Marketing & Updates</h4>
+                  <p className="text-sm text-gray-500">Receive product updates, tips, and feature announcements.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={marketingEnabled}
+                  onClick={() => togglePreference('marketing', !marketingEnabled)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${marketingEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${marketingEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 pt-2">Security-related emails (password resets, login alerts) cannot be disabled.</p>
             </CardContent>
           </Card>
         </div>

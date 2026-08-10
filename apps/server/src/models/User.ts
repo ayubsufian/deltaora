@@ -5,6 +5,10 @@ import * as argon2 from 'argon2';
 export interface IUserDocument extends Omit<IUser, '_id'>, Document {
   mfaEnabled: boolean;
   mfaSecret?: string;
+  emailPreferences: {
+    marketing: boolean;
+    notifications: boolean;
+  };
 }
 
 const UserSchema = new Schema<IUserDocument>(
@@ -15,6 +19,10 @@ const UserSchema = new Schema<IUserDocument>(
     role: { type: String, default: 'user' },
     mfaEnabled: { type: Boolean, default: false },
     mfaSecret: { type: String },
+    emailPreferences: {
+      marketing: { type: Boolean, default: false },
+      notifications: { type: Boolean, default: true },
+    },
   },
   { timestamps: true }
 );
@@ -30,3 +38,4 @@ UserSchema.pre('save', async function (next) {
 });
 
 export const User = mongoose.model<IUserDocument>('User', UserSchema);
+
