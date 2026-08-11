@@ -144,3 +144,16 @@ export const pageChangeNotificationEmail = (pageTitle: string, pageUrl: string, 
     <a href="${BASE_URL}/pages/${pageId}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">View Full Report</a>
   </div>
 `, { showUnsubscribe: true });
+
+export const verificationEmail = (verificationUrl: string) => baseLayout(`
+  <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Verify Your Email Address</h2>
+  <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
+    Thank you for registering for Deltaora. To complete your signup and unlock all features, please verify your email address.
+  </p>
+  <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #4b5563;">
+    Click the button below to verify your email. This link is valid for <strong>24 hours</strong>.
+  </p>
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="${verificationUrl}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Verify Email</a>
+  </div>
+`);

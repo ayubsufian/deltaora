@@ -15,10 +15,12 @@ const UserSchema = new Schema<IUserDocument>(
   {
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    passwordHash: { type: String, required: true },
+    passwordHash: { type: String }, // Optional for OAuth
     role: { type: String, default: 'user' },
     mfaEnabled: { type: Boolean, default: false },
     mfaSecret: { type: String },
+    isEmailVerified: { type: Boolean, default: false },
+    googleId: { type: String },
     emailPreferences: {
       marketing: { type: Boolean, default: false },
       notifications: { type: Boolean, default: true },
@@ -28,7 +30,7 @@ const UserSchema = new Schema<IUserDocument>(
 );
 
 UserSchema.pre('save', async function (next) {
-  if (!this.isModified('passwordHash')) return next();
+  if (!this.isModified('passwordHash') || !this.passwordHash) return next();
   try {
     this.passwordHash = await argon2.hash(this.passwordHash);
     next();

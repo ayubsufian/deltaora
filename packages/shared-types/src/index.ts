@@ -39,8 +39,10 @@ export interface IUser {
   _id: string;
   name: string;
   email: string;
-  passwordHash: string;
+  passwordHash?: string; // Optional for OAuth users
   role: string;
+  isEmailVerified: boolean;
+  googleId?: string;
   createdAt: Date;
 }
 

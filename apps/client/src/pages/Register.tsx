@@ -7,13 +7,14 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 import toast from 'react-hot-toast';
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
 export function Register() {
   const navigate = useNavigate();
-  const { register: registerUser } = useAuth();
+  const { register: registerUser, googleLogin } = useAuth();
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
   });
@@ -21,10 +22,22 @@ export function Register() {
   const onSubmit = async (data: RegisterForm) => {
     try {
       await registerUser(data.name, data.email, data.password, data.confirmPassword);
-      toast.success('Account created successfully');
+      toast.success('Account created! Please check your email to verify.');
       navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to create account');
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse: any) => {
+    try {
+      if (credentialResponse.credential) {
+        await googleLogin(credentialResponse.credential);
+        toast.success('Logged in with Google successfully');
+        navigate('/dashboard');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Google login failed');
     }
   };
 
@@ -36,6 +49,28 @@ export function Register() {
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
+          <div className="flex justify-center w-full">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => toast.error('Google login failed')}
+              useOneTap
+              theme="filled_blue"
+              shape="rectangular"
+              width="100%"
+            />
+          </div>
+          
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-gray-300 dark:border-gray-700" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white dark:bg-gray-800 px-2 text-gray-500">
+                Or continue with
+              </span>
+            </div>
+          </div>
+
           <Input
             label="Name"
             placeholder="John Doe"

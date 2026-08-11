@@ -28,3 +28,27 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction) => 
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
   }
 };
+
+import { User } from '../models/User';
+
+export const requireVerifiedEmail = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Must be called after requireAuth
+    if (!req.user?.userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await User.findById(req.user.userId).select('isEmailVerified');
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    if (!user.isEmailVerified) {
+      return res.status(403).json({ error: 'Email Verification Required', code: 'EMAIL_UNVERIFIED' });
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};

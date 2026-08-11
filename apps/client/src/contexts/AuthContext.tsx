@@ -6,6 +6,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  isEmailVerified?: boolean;
 }
 
 interface AuthContextType {
@@ -16,6 +17,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string, mfaCode?: string) => Promise<void>;
+  googleLogin: (token: string) => Promise<void>;
   register: (name: string, email: string, password: string, confirmPassword: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -49,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // Decode user from token (JWT payload is the second segment)
           const payload = JSON.parse(atob(newToken.split('.')[1]));
-          setUser({ id: payload.userId, name: payload.name || '', email: payload.email || '', role: payload.role || 'user' });
+          setUser({ id: payload.userId, name: payload.name || '', email: payload.email || '', role: payload.role || 'user', isEmailVerified: res.data.user?.isEmailVerified });
           
           // Set Axios header if we have an active workspace
           const savedWorkspace = localStorage.getItem('activeWorkspaceId');
@@ -95,6 +97,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [setActiveWorkspaceId]);
 
+  const googleLogin = useCallback(async (tokenStr: string) => {
+    const res = await api.post('/auth/google', { token: tokenStr }, { withCredentials: true });
+    const { accessToken, user: userData, workspaceId } = res.data;
+    localStorage.setItem('token', accessToken);
+    setToken(accessToken);
+    setUser(userData);
+    
+    if (workspaceId) {
+      setActiveWorkspaceId(workspaceId);
+    }
+  }, [setActiveWorkspaceId]);
+
   const logout = useCallback(async () => {
     try {
       await api.post('/auth/logout', {}, { withCredentials: true });
@@ -112,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ 
       user, token, activeWorkspaceId, setActiveWorkspaceId, 
-      isAuthenticated: !!user, isLoading, login, register, logout 
+      isAuthenticated: !!user, isLoading, login, googleLogin, register, logout 
     }}>
       {children}
     </AuthContext.Provider>

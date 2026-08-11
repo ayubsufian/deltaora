@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 import toast from 'react-hot-toast';
 
 const mfaLoginSchema = loginSchema.extend({
@@ -18,7 +19,7 @@ type LoginForm = z.infer<typeof mfaLoginSchema>;
 
 export function Login() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const [requiresMfa, setRequiresMfa] = useState(false);
   
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
@@ -41,6 +42,18 @@ export function Login() {
     }
   };
 
+  const handleGoogleSuccess = async (credentialResponse: any) => {
+    try {
+      if (credentialResponse.credential) {
+        await googleLogin(credentialResponse.credential);
+        toast.success('Logged in with Google successfully');
+        navigate('/dashboard');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Google login failed');
+    }
+  };
+
   return (
     <Card className="w-full">
       <CardHeader className="text-center">
@@ -53,6 +66,32 @@ export function Login() {
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
+          {!requiresMfa && (
+            <>
+              <div className="flex justify-center w-full">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => toast.error('Google login failed')}
+                  useOneTap
+                  theme="filled_blue"
+                  shape="rectangular"
+                  width="100%"
+                />
+              </div>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-gray-300 dark:border-gray-700" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white dark:bg-gray-800 px-2 text-gray-500">
+                    Or continue with
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+
           <div className={requiresMfa ? 'hidden' : 'space-y-4'}>
             <Input
               label="Email"

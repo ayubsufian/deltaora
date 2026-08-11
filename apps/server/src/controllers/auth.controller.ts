@@ -7,11 +7,13 @@ import { generateTokens, revokeRefreshToken, verifyRefreshToken } from '../servi
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { sendEmail } from '../services/email.service';
-import { welcomeEmail, passwordResetEmail } from '../utils/emailTemplates';
+import { welcomeEmail, passwordResetEmail, verificationEmail } from '../utils/emailTemplates';
 import { OTP } from 'otplib';
 import QRCode from 'qrcode';
+import { OAuth2Client } from 'google-auth-library';
 
 const otp = new OTP();
+const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -44,14 +46,22 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    // 2026 Standard: Send welcome email (fire-and-forget)
+    // Generate verification token
+    const verificationToken = jwt.sign(
+      { userId: user.id },
+      env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    const verificationUrl = `${env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${verificationToken}`;
+
+    // 2026 Standard: Send welcome + verification email (fire-and-forget)
     sendEmail({
       to: email,
-      subject: 'Welcome to Deltaora!',
-      htmlContent: welcomeEmail(name),
-    }).catch(err => console.error('Failed to send welcome email:', err));
+      subject: 'Deltaora — Verify Your Email',
+      htmlContent: verificationEmail(verificationUrl),
+    }).catch(err => console.error('Failed to send verification email:', err));
 
-    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled }, workspaceId: workspace.id });
+    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled, isEmailVerified: user.isEmailVerified }, workspaceId: workspace.id });
   } catch (error) {
     next(error);
   }
@@ -64,6 +74,10 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: 'Please sign in with Google or reset your password' });
     }
 
     const isValid = await argon2.verify(user.passwordHash, password);
@@ -281,6 +295,139 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     await user.save();
 
     res.json({ message: 'Password has been successfully reset. You may now log in.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Email Verification ──
+
+export const sendVerificationEmail = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await User.findById(req.user?.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.isEmailVerified) {
+      return res.status(400).json({ error: 'Email is already verified' });
+    }
+
+    const verificationToken = jwt.sign(
+      { userId: user.id },
+      env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    const verificationUrl = `${env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${verificationToken}`;
+
+    await sendEmail({
+      to: user.email,
+      subject: 'Deltaora — Verify Your Email',
+      htmlContent: verificationEmail(verificationUrl),
+    });
+
+    res.json({ message: 'Verification email sent' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmail = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid or expired token' });
+    }
+
+    const user = await User.findById(decoded.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.isEmailVerified = true;
+    await user.save();
+
+    res.json({ message: 'Email verified successfully', user: { isEmailVerified: true } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Google OAuth ──
+
+export const googleLogin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { token } = req.body;
+    
+    // Verify the Google ID Token securely on the backend
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      return res.status(400).json({ error: 'Invalid Google token' });
+    }
+
+    const { email, name, sub: googleId } = payload;
+    
+    let user = await User.findOne({ email });
+    let workspaceId;
+
+    if (!user) {
+      // Create new user (automatically verified since it's via Google)
+      user = new User({
+        name: name || 'User',
+        email,
+        googleId,
+        isEmailVerified: true,
+      });
+      await user.save();
+
+      // Provision personal workspace
+      const workspace = new Workspace({
+        name: `${user.name}'s Workspace`,
+        ownerId: user._id,
+        members: [{ userId: user._id, role: 'owner', joinedAt: new Date() }],
+        plan: 'free',
+        maxPages: 10,
+      });
+      await workspace.save();
+      workspaceId = workspace.id;
+
+      // Send welcome email (fire-and-forget)
+      sendEmail({
+        to: email,
+        subject: 'Welcome to Deltaora!',
+        htmlContent: welcomeEmail(user.name),
+      }).catch(err => console.error('Failed to send welcome email:', err));
+    } else {
+      // Link Google ID if not already linked (e.g. user previously signed up with email)
+      if (!user.googleId) {
+        user.googleId = googleId;
+        // Also verify their email if it wasn't already since Google confirmed it
+        user.isEmailVerified = true;
+        await user.save();
+      }
+    }
+
+    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.json({ 
+      accessToken, 
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled, isEmailVerified: user.isEmailVerified },
+      workspaceId
+    });
   } catch (error) {
     next(error);
   }

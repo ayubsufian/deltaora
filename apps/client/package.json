@@ -13,6 +13,7 @@
     "@deltaora/shared-utils": "workspace:*",
     "@deltaora/validation": "workspace:*",
     "@hookform/resolvers": "^3.9.0",
+    "@react-oauth/google": "^0.13.5",
     "@tanstack/react-query": "^5.51.15",
     "axios": "^1.7.2",
     "class-variance-authority": "^0.7.0",

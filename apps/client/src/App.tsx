@@ -13,6 +13,7 @@ import { Register } from './pages/Register';
 import { JoinWorkspace } from './pages/JoinWorkspace';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { ResetPassword } from './pages/ResetPassword';
+import { VerifyEmail } from './pages/VerifyEmail';
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
       </Route>
       
       <Route path="/join" element={<JoinWorkspace />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       
       <Route element={<DashboardLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />
