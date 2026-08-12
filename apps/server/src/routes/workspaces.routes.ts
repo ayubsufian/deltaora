@@ -21,7 +21,7 @@ router.get('/:id/audit-logs', getAuditLogs);
 
 router.post(
   '/:id/invites',
-  validate(z.object({ role: z.enum(['editor', 'viewer']) })),
+  validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().email().optional() })),
   generateInvite
 );
 

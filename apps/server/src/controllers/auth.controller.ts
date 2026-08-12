@@ -1,9 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Workspace } from '../models/Workspace';
+import { PasswordResetToken } from '../models/PasswordResetToken';
+import { UserSession } from '../models/UserSession';
 import * as argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
-import { generateTokens, revokeRefreshToken, verifyRefreshToken } from '../services/auth.service';
+import {
+  clearAuthCookies,
+  generateTokens,
+  REFRESH_TOKEN_COOKIE,
+  revokeAllUserSessions,
+  revokeRefreshToken,
+  setAuthCookies,
+  verifyRefreshToken,
+} from '../services/auth.service';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { sendEmail } from '../services/email.service';
@@ -11,13 +21,47 @@ import { welcomeEmail, passwordResetEmail, verificationEmail } from '../utils/em
 import { OTP } from 'otplib';
 import QRCode from 'qrcode';
 import { OAuth2Client } from 'google-auth-library';
+import { validatePasswordPolicy } from '../services/passwordPolicy.service';
+import { generateRecoveryCodes, randomToken, sha256, verifyRecoveryCode } from '../services/security.service';
 
 const otp = new OTP();
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+const GENERIC_LOGIN_ERROR = 'Invalid email or password';
+const RESET_MESSAGE = 'If an account exists with that email, a password reset link has been sent.';
+
+const publicUser = (user: any) => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  mfaEnabled: user.mfaEnabled,
+  isEmailVerified: user.isEmailVerified,
+});
+
+const recordFailedLogin = async (user: any) => {
+  user.failedLoginCount = (user.failedLoginCount || 0) + 1;
+  if (user.failedLoginCount >= 5) {
+    const lockMinutes = Math.min(60, 2 ** Math.min(user.failedLoginCount - 5, 4) * 5);
+    user.lockoutUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
+  }
+  await user.save();
+};
+
+const clearFailedLogins = async (user: any) => {
+  user.failedLoginCount = 0;
+  user.lockoutUntil = undefined;
+  user.lastLoginAt = new Date();
+  await user.save();
+};
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body;
+
+    const passwordErrors = validatePasswordPolicy(password, { email, name });
+    if (passwordErrors.length > 0) {
+      return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordErrors });
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -37,14 +81,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     });
     await workspace.save();
 
-    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    const tokens = await generateTokens(user.id, user.role, req);
+    setAuthCookies(res, tokens);
 
     // Generate verification token
     const verificationToken = jwt.sign(
@@ -61,7 +99,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       htmlContent: verificationEmail(verificationUrl),
     }).catch(err => console.error('Failed to send verification email:', err));
 
-    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled, isEmailVerified: user.isEmailVerified }, workspaceId: workspace.id });
+    res.status(201).json({ accessToken: tokens.accessToken, user: publicUser(user), workspaceId: workspace.id });
   } catch (error) {
     next(error);
   }
@@ -69,11 +107,19 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, mfaCode } = req.body;
+    const { email, password, mfaCode, recoveryCode } = req.body;
 
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    if (user.status !== 'active') {
+      return res.status(403).json({ error: 'Account is not active' });
+    }
+
+    if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      return res.status(429).json({ error: 'Account temporarily locked. Use password reset or try again later.' });
     }
 
     if (!user.passwordHash) {
@@ -82,37 +128,42 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     const isValid = await argon2.verify(user.passwordHash, password);
     if (!isValid) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      await recordFailedLogin(user);
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
-    // 2026 Standard MFA flow
     if (user.mfaEnabled) {
-      if (!mfaCode) {
-        // Return 401 with specific flag to prompt frontend for MFA code
+      if (!mfaCode && !recoveryCode) {
         return res.status(401).json({ error: 'MFA_REQUIRED', message: 'Multi-factor authentication required' });
       }
 
-      const mfaResult = await otp.verify({ token: mfaCode, secret: user.mfaSecret! });
-      if (!mfaResult.valid) {
+      const mfaResult = mfaCode
+        ? await otp.verify({ token: mfaCode, secret: user.mfaSecret! })
+        : { valid: false };
+      const usedRecoveryHash = !mfaResult.valid && recoveryCode
+        ? await verifyRecoveryCode(user.mfaRecoveryCodeHashes, recoveryCode)
+        : null;
+
+      if (!mfaResult.valid && !usedRecoveryHash) {
+        await recordFailedLogin(user);
         return res.status(401).json({ error: 'INVALID_MFA', message: 'Invalid authentication code' });
+      }
+
+      if (usedRecoveryHash) {
+        user.mfaRecoveryCodeHashes = user.mfaRecoveryCodeHashes.filter((hash: string) => hash !== usedRecoveryHash);
       }
     }
 
-    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    await clearFailedLogins(user);
+    const tokens = await generateTokens(user.id, user.role, req);
+    setAuthCookies(res, tokens);
 
     // Return default workspace on login
     const workspace = await Workspace.findOne({ 'members.userId': user._id });
 
     res.status(200).json({ 
-      accessToken, 
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled },
+      accessToken: tokens.accessToken,
+      user: publicUser(user),
       defaultWorkspaceId: workspace?.id
     });
   } catch (error) {
@@ -122,36 +173,36 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
 export const refresh = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { refreshToken } = req.cookies;
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
     if (!refreshToken) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const decoded = verifyRefreshToken(refreshToken);
-    
-    // Check Redis whitelist
-    const isValidInRedis = await redis.get(`refresh_token:${decoded.userId}:${refreshToken}`);
-    if (!isValidInRedis) {
+
+    const refreshTokenHash = sha256(refreshToken);
+    const isValidInRedis = await redis.get(`refresh_token:${decoded.sessionId}`);
+    const session = await UserSession.findOne({
+      _id: decoded.sessionId,
+      userId: decoded.userId,
+      refreshTokenHash,
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (isValidInRedis !== refreshTokenHash || !session) {
       return res.status(401).json({ error: 'Unauthorized: Session expired or revoked' });
     }
 
     const user = await User.findById(decoded.userId);
-    if (!user) {
+    if (!user || user.status !== 'active') {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Revoke old token and generate new ones (Rotation)
-    await revokeRefreshToken(user.id, refreshToken);
-    const { accessToken, refreshToken: newRefreshToken } = await generateTokens(user.id, user.role);
+    const tokens = await generateTokens(user.id, user.role, req, decoded.sessionId);
+    setAuthCookies(res, tokens);
 
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({ accessToken });
+    res.json({ accessToken: tokens.accessToken, user: publicUser(user) });
   } catch (error) {
     return res.status(401).json({ error: 'Unauthorized: Invalid refresh token' });
   }
@@ -159,7 +210,7 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
 
 export const logout = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { refreshToken } = req.cookies;
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
     if (refreshToken) {
       try {
         const decoded = verifyRefreshToken(refreshToken);
@@ -169,7 +220,7 @@ export const logout = async (req: Request, res: Response, next: NextFunction) =>
       }
     }
 
-    res.clearCookie('refreshToken');
+    clearAuthCookies(res);
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     next(error);
@@ -225,10 +276,12 @@ export const verifyMfa = async (req: Request, res: Response, next: NextFunction)
       return res.status(400).json({ error: 'Invalid authentication code' });
     }
 
+    const { codes, hashes } = await generateRecoveryCodes();
     user.mfaEnabled = true;
+    user.mfaRecoveryCodeHashes = hashes;
     await user.save();
 
-    res.json({ message: 'MFA enabled successfully' });
+    res.json({ message: 'MFA enabled successfully', recoveryCodes: codes });
   } catch (error) {
     next(error);
   }
@@ -243,17 +296,17 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
     const user = await User.findOne({ email });
     if (!user) {
       // 2026 Standard: Do not leak whether an email exists or not
-      return res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
+      return res.json({ message: RESET_MESSAGE });
     }
 
-    // Generate a secure, short-lived (15 min) JWT token for reset
-    const resetToken = jwt.sign(
-      { userId: user.id },
-      env.JWT_SECRET + user.passwordHash, // Use current passwordHash in secret so token invalidates after use
-      { expiresIn: '15m' }
-    );
+    const resetToken = randomToken(32);
+    await PasswordResetToken.create({
+      userId: user._id,
+      tokenHash: sha256(resetToken),
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
 
-    const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}&id=${user.id}`;
+    const resetUrl = `${env.CLIENT_URL}/reset-password?token=${resetToken}`;
 
     await sendEmail({
       to: user.email,
@@ -261,7 +314,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       htmlContent: passwordResetEmail(resetUrl),
     });
 
-    res.json({ message: 'If an account exists with that email, a password reset link has been sent.' });
+    res.json({ message: RESET_MESSAGE });
   } catch (error) {
     next(error);
   }
@@ -269,30 +322,37 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 
 export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id, token, newPassword } = req.body;
+    const { token, newPassword } = req.body;
 
-    const user = await User.findById(id);
+    const resetRecord = await PasswordResetToken.findOne({
+      tokenHash: sha256(token),
+      usedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!resetRecord) {
+      return res.status(400).json({ error: 'Invalid or expired token' });
+    }
+
+    const user = await User.findById(resetRecord.userId);
     if (!user) {
       return res.status(400).json({ error: 'Invalid or expired token' });
     }
 
-    try {
-      // Verify token using the secret combined with the CURRENT password hash
-      jwt.verify(token, env.JWT_SECRET + user.passwordHash);
-    } catch (err) {
-      return res.status(400).json({ error: 'Invalid or expired token' });
+    const passwordErrors = validatePasswordPolicy(newPassword, { email: user.email, name: user.name });
+    if (passwordErrors.length > 0) {
+      return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordErrors });
     }
 
-    // Token is valid, update password
-    user.passwordHash = await argon2.hash(newPassword);
-    
-    // Invalidate all existing sessions for security
-    const keys = await redis.keys(`refresh_token:${user.id}:*`);
-    if (keys.length > 0) {
-      await redis.del(keys);
-    }
-
+    user.passwordHash = newPassword;
+    user.passwordChangedAt = new Date();
+    user.failedLoginCount = 0;
+    user.lockoutUntil = undefined;
+    resetRecord.usedAt = new Date();
+    await resetRecord.save();
     await user.save();
+    await revokeAllUserSessions(user.id, 'password_reset');
+    clearAuthCookies(res);
 
     res.json({ message: 'Password has been successfully reset. You may now log in.' });
   } catch (error) {
@@ -368,7 +428,7 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
     });
     
     const payload = ticket.getPayload();
-    if (!payload || !payload.email) {
+    if (!payload || !payload.email || !payload.email_verified) {
       return res.status(400).json({ error: 'Invalid Google token' });
     }
 
@@ -405,6 +465,9 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
         htmlContent: welcomeEmail(user.name),
       }).catch(err => console.error('Failed to send welcome email:', err));
     } else {
+      if (user.status !== 'active') {
+        return res.status(403).json({ error: 'Account is not active' });
+      }
       // Link Google ID if not already linked (e.g. user previously signed up with email)
       if (!user.googleId) {
         user.googleId = googleId;
@@ -414,22 +477,17 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
-    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    user.lastLoginAt = new Date();
+    await user.save();
+    const tokens = await generateTokens(user.id, user.role, req);
+    setAuthCookies(res, tokens);
 
     res.json({ 
-      accessToken, 
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled, isEmailVerified: user.isEmailVerified },
+      accessToken: tokens.accessToken,
+      user: publicUser(user),
       workspaceId
     });
   } catch (error) {
     next(error);
   }
 };
-

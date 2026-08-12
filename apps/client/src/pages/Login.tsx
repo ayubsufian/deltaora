@@ -12,7 +12,8 @@ import { GoogleLogin } from '@react-oauth/google';
 import toast from 'react-hot-toast';
 
 const mfaLoginSchema = loginSchema.extend({
-  mfaCode: z.string().optional()
+  mfaCode: z.string().optional(),
+  recoveryCode: z.string().optional()
 });
 
 type LoginForm = z.infer<typeof mfaLoginSchema>;
@@ -28,7 +29,7 @@ export function Login() {
 
   const onSubmit = async (data: LoginForm) => {
     try {
-      await login(data.email, data.password, data.mfaCode);
+      await login(data.email, data.password, data.mfaCode, data.recoveryCode);
       toast.success('Logged in successfully');
       navigate('/dashboard');
     } catch (error: any) {
@@ -128,6 +129,15 @@ export function Login() {
               {...register('mfaCode')}
               error={errors.mfaCode?.message}
               autoFocus
+            />
+          )}
+          {requiresMfa && (
+            <Input
+              label="Recovery Code"
+              type="text"
+              placeholder="Optional"
+              {...register('recoveryCode')}
+              error={errors.recoveryCode?.message}
             />
           )}
         </CardContent>

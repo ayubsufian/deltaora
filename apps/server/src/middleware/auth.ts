@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken } from '../services/auth.service';
+import { ACCESS_TOKEN_COOKIE, verifyAccessToken } from '../services/auth.service';
+import { UserSession } from '../models/UserSession';
+import { User } from '../models/User';
 
 declare global {
   namespace Express {
@@ -7,29 +9,46 @@ declare global {
       user?: {
         userId: string;
         role: string;
+        sessionId: string;
       };
     }
   }
 }
 
-export const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.split(' ')[1]
+      : req.cookies?.[ACCESS_TOKEN_COOKIE];
+
+    if (!token) {
       return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
     }
 
-    const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
-    
+
+    const [user, session] = await Promise.all([
+      User.findById(decoded.userId).select('status role'),
+      UserSession.findOne({
+        _id: decoded.sessionId,
+        userId: decoded.userId,
+        revokedAt: { $exists: false },
+        expiresAt: { $gt: new Date() },
+      }).select('_id'),
+    ]);
+
+    if (!user || user.status !== 'active' || !session) {
+      return res.status(401).json({ error: 'Unauthorized: Session expired or revoked' });
+    }
+
+    decoded.role = user.role;
     req.user = decoded;
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
   }
 };
-
-import { User } from '../models/User';
 
 export const requireVerifiedEmail = async (req: Request, res: Response, next: NextFunction) => {
   try {

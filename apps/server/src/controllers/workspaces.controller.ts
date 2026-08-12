@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { Workspace } from '../models/Workspace';
 import { User } from '../models/User';
-import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { ForbiddenError } from '@casl/ability';
 import mongoose from 'mongoose';
@@ -9,6 +8,8 @@ import { logAuditEvent } from '../services/audit.service';
 import { AuditLog } from '../models/AuditLog';
 import { sendEmail } from '../services/email.service';
 import { workspaceInviteEmail } from '../utils/emailTemplates';
+import { WorkspaceInvite } from '../models/WorkspaceInvite';
+import { randomToken, sha256 } from '../services/security.service';
 
 export const getMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -59,14 +60,17 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
       return res.status(400).json({ error: 'Invalid role for invitation' });
     }
 
-    // Generate a secure JWT for the invite link (valid for 48 hours)
-    const inviteToken = jwt.sign(
-      { workspaceId, role, inviterId: req.user!.userId },
-      env.JWT_SECRET,
-      { expiresIn: '48h' }
-    );
+    const inviteToken = randomToken(32);
+    await WorkspaceInvite.create({
+      workspaceId,
+      role,
+      inviterId: req.user!.userId,
+      inviteeEmail: email,
+      tokenHash: sha256(inviteToken),
+      expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000),
+    });
 
-    const joinUrl = `http://localhost:5173/join?token=${inviteToken}`;
+    const joinUrl = `${env.CLIENT_URL}/join?token=${inviteToken}`;
 
     // 2026 Standard: If an email is provided, automatically send the invite
     if (email) {
@@ -114,14 +118,27 @@ export const joinWorkspace = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ error: 'Invite token is required' });
     }
 
-    let decoded: any;
-    try {
-      decoded = jwt.verify(inviteToken, env.JWT_SECRET);
-    } catch (err) {
+    const invite = await WorkspaceInvite.findOne({
+      tokenHash: sha256(inviteToken),
+      acceptedAt: { $exists: false },
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!invite) {
       return res.status(400).json({ error: 'Invalid or expired invite token' });
     }
 
-    const { workspaceId, role } = decoded;
+    const workspaceId = invite.workspaceId.toString();
+    const { role } = invite;
+    const user = await User.findById(userId).select('email');
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (invite.inviteeEmail && invite.inviteeEmail !== user.email.toLowerCase()) {
+      return res.status(403).json({ error: 'This invite was sent to a different email address' });
+    }
 
     const workspace = await Workspace.findById(workspaceId);
     if (!workspace) {
@@ -139,7 +156,9 @@ export const joinWorkspace = async (req: Request, res: Response, next: NextFunct
       joinedAt: new Date(),
     });
 
+    invite.acceptedAt = new Date();
     await workspace.save();
+    await invite.save();
     
     // Log Audit Event
     await logAuditEvent({

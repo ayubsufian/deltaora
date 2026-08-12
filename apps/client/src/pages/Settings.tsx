@@ -23,6 +23,15 @@ interface AuditLog {
   ipAddress?: string;
 }
 
+interface Session {
+  id: string;
+  userAgent?: string;
+  ipAddress?: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  current: boolean;
+}
+
 export function Settings() {
   const { user, activeWorkspaceId } = useAuth();
   
@@ -32,6 +41,10 @@ export function Settings() {
   const [qrCode, setQrCode] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [mfaEnabled, setMfaEnabled] = useState((user as any)?.mfaEnabled || false);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [sessions, setSessions] = useState<Session[]>([]);
 
   // Team State
   const [members, setMembers] = useState<Member[]>([]);
@@ -53,6 +66,7 @@ export function Settings() {
       fetchAuditLogs();
     }
     fetchEmailPreferences();
+    fetchSessions();
   }, [activeWorkspaceId]);
 
   const fetchEmailPreferences = async () => {
@@ -94,6 +108,27 @@ export function Settings() {
     }
   };
 
+  const fetchSessions = async () => {
+    try {
+      const res = await api.get('/users/me/sessions');
+      setSessions(res.data);
+    } catch {
+      // Ignore until the account is fully verified.
+    }
+  };
+
+  const changePassword = async () => {
+    try {
+      await api.post('/users/me/password', { currentPassword, newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      toast.success('Password changed. Other sessions were revoked.');
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.response?.data?.details?.[0] || error.response?.data?.error || 'Failed to change password');
+    }
+  };
+
   const startMfaSetup = async () => {
     try {
       const res = await api.post('/auth/mfa/setup');
@@ -107,12 +142,54 @@ export function Settings() {
 
   const verifyAndEnableMfa = async () => {
     try {
-      await api.post('/auth/mfa/verify', { code: verificationCode });
+      const res = await api.post('/auth/mfa/verify', { code: verificationCode });
       setMfaEnabled(true);
       setIsSettingUpMfa(false);
+      setRecoveryCodes(res.data.recoveryCodes || []);
       toast.success('Multi-Factor Authentication enabled successfully!');
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Invalid verification code');
+    }
+  };
+
+  const disableMfa = async () => {
+    try {
+      await api.post('/users/me/mfa/disable', { currentPassword });
+      setMfaEnabled(false);
+      setRecoveryCodes([]);
+      toast.success('Two-factor authentication disabled');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to disable MFA');
+    }
+  };
+
+  const regenerateRecoveryCodes = async () => {
+    try {
+      const res = await api.post('/users/me/mfa/recovery-codes');
+      setRecoveryCodes(res.data.recoveryCodes || []);
+      toast.success('Recovery codes regenerated');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to regenerate recovery codes');
+    }
+  };
+
+  const revokeSession = async (sessionId: string) => {
+    try {
+      await api.delete(`/users/me/sessions/${sessionId}`);
+      toast.success('Session revoked');
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to revoke session');
+    }
+  };
+
+  const revokeOtherSessions = async () => {
+    try {
+      await api.delete('/users/me/sessions/others');
+      toast.success('Other sessions revoked');
+      fetchSessions();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to revoke sessions');
     }
   };
 
@@ -364,6 +441,70 @@ export function Settings() {
                   </div>
                 </div>
               )}
+
+              {mfaEnabled && (
+                <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={regenerateRecoveryCodes}>Regenerate Recovery Codes</Button>
+                    <Button variant="destructive" onClick={disableMfa}>Disable 2FA</Button>
+                  </div>
+                  {recoveryCodes.length > 0 && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                      <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Save these recovery codes now. They will not be shown again.</p>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-sm">
+                        {recoveryCodes.map(code => (
+                          <div key={code} className="rounded border bg-white px-2 py-1 dark:bg-gray-900 dark:border-gray-800">{code}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-3">
+                <h4 className="font-medium text-gray-900 dark:text-white">Password</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input
+                    label="Current Password"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                  />
+                  <Input
+                    label="New Password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+                </div>
+                <Button onClick={changePassword} disabled={!currentPassword || newPassword.length < 15}>
+                  Change Password
+                </Button>
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-gray-900 dark:text-white">Active Sessions</h4>
+                  <Button variant="outline" size="sm" onClick={revokeOtherSessions}>Revoke Others</Button>
+                </div>
+                <div className="space-y-2">
+                  {sessions.map(session => (
+                    <div key={session.id} className="flex items-center justify-between rounded-md border p-3 dark:border-gray-800">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {session.current ? 'Current session' : session.userAgent || 'Unknown device'}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {session.ipAddress || 'Unknown IP'} · Last seen {new Date(session.lastSeenAt).toLocaleString()}
+                        </div>
+                      </div>
+                      {!session.current && (
+                        <Button variant="outline" size="sm" onClick={() => revokeSession(session.id)}>Revoke</Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

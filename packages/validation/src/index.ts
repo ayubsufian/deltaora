@@ -4,7 +4,7 @@ import { Category, Importance } from '@deltaora/shared-types';
 export const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").max(50),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z.string().min(15, "Password must be at least 15 characters").max(1024),
   confirmPassword: z.string()
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords don't match",

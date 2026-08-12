@@ -1,16 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import { MonitoredPage } from '../models/MonitoredPage';
 import { Diff } from '../models/Diff';
-import { AISummary } from '../models/AISummary';
-import mongoose from 'mongoose';
+import { ForbiddenError } from '@casl/ability';
 
 export const getTimeseriesStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.userId;
-    
-    // First, find all user's pages
-    const userPages = await MonitoredPage.find({ userId }).select('_id');
-    const pageIds = userPages.map(p => p._id);
+    const workspaceId = req.workspaceId;
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+
+    const workspacePages = await MonitoredPage.find({ workspaceId }).select('_id');
+    const pageIds = workspacePages.map(p => p._id);
     
     if (pageIds.length === 0) {
       return res.json({ weekly: [], monthly: [] });
@@ -62,6 +65,9 @@ export const getTimeseriesStats = async (req: Request, res: Response, next: Next
 
     res.json({ weekly, monthly });
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: error.message });
+    }
     next(error);
   }
 };

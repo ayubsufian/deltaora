@@ -28,7 +28,8 @@ router.post('/register', authLimiter, validate(registerSchema), register);
 
 // Accept optional mfaCode for 2FA
 const mfaLoginSchema = loginSchema.extend({
-  mfaCode: z.string().optional()
+  mfaCode: z.string().optional(),
+  recoveryCode: z.string().optional()
 });
 router.post('/login', authLimiter, validate(mfaLoginSchema), login);
 
@@ -68,7 +69,7 @@ router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().len
 
 // ── Account Recovery ──
 router.post('/forgot-password', authLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);
-router.post('/reset-password', authLimiter, validate(z.object({ id: z.string(), token: z.string(), newPassword: z.string().min(8) })), resetPassword);
+router.post('/reset-password', authLimiter, validate(z.object({ token: z.string(), newPassword: z.string().min(15).max(1024) })), resetPassword);
 
 // ── Email Verification & Google Auth ──
 router.post('/send-verification', requireAuth, sendVerificationEmail);

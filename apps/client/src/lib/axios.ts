@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api/v1',
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -9,7 +10,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('accessToken');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -33,14 +34,14 @@ api.interceptors.response.use(
           // You might need to send a refresh token here if it's not in cookies
           withCredentials: true,
         });
-        const { token } = res.data;
-        if (token) {
-          localStorage.setItem('token', token);
-          api.defaults.headers.common.Authorization = `Bearer ${token}`;
-          return api(originalRequest);
+        const { accessToken } = res.data;
+        if (accessToken) {
+          sessionStorage.setItem('accessToken', accessToken);
+          api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
         }
+        return api(originalRequest);
       } catch (refreshError) {
-        localStorage.removeItem('token');
+        sessionStorage.removeItem('accessToken');
         // Handle logout or redirect to login
         window.location.href = '/login';
         return Promise.reject(refreshError);

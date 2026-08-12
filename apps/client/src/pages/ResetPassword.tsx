@@ -8,7 +8,6 @@ import api from '../lib/axios';
 export function ResetPassword() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
-  const id = searchParams.get('id');
   
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
@@ -17,25 +16,25 @@ export function ResetPassword() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!token || !id) {
+    if (!token) {
       setError('Invalid or missing password reset token.');
     }
-  }, [token, id]);
+  }, [token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirmPassword) {
       return setError('Passwords do not match');
     }
-    if (password.length < 8) {
-      return setError('Password must be at least 8 characters long');
+    if (password.length < 15) {
+      return setError('Password must be at least 15 characters long');
     }
 
     setIsSubmitting(true);
     setError('');
 
     try {
-      await api.post('/auth/reset-password', { id, token, newPassword: password });
+      await api.post('/auth/reset-password', { token, newPassword: password });
       navigate('/login', { state: { message: 'Password has been successfully reset. You may now log in.' } });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to reset password. The link may have expired.');

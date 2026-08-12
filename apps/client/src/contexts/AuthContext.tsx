@@ -6,6 +6,7 @@ interface User {
   name: string;
   email: string;
   role: string;
+  mfaEnabled?: boolean;
   isEmailVerified?: boolean;
 }
 
@@ -16,7 +17,7 @@ interface AuthContextType {
   setActiveWorkspaceId: (id: string) => void;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string, mfaCode?: string) => Promise<void>;
+  login: (email: string, password: string, mfaCode?: string, recoveryCode?: string) => Promise<void>;
   googleLogin: (token: string) => Promise<void>;
   register: (name: string, email: string, password: string, confirmPassword: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -26,7 +27,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('accessToken'));
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() => localStorage.getItem('activeWorkspaceId'));
   const [isLoading, setIsLoading] = useState(true);
 
@@ -36,50 +37,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.defaults.headers.common['x-workspace-id'] = id;
   }, []);
 
-  // On mount, try to restore session via refresh token
   useEffect(() => {
     const restore = async () => {
-      const savedToken = localStorage.getItem('token');
-      if (savedToken) {
-        setToken(savedToken);
-        try {
-          // Try a refresh to validate the session and get user data
-          const res = await api.post('/auth/refresh', {}, { withCredentials: true });
-          const newToken = res.data.accessToken;
-          localStorage.setItem('token', newToken);
-          setToken(newToken);
-          
-          // Decode user from token (JWT payload is the second segment)
-          const payload = JSON.parse(atob(newToken.split('.')[1]));
-          setUser({ id: payload.userId, name: payload.name || '', email: payload.email || '', role: payload.role || 'user', isEmailVerified: res.data.user?.isEmailVerified });
-          
-          // Set Axios header if we have an active workspace
-          const savedWorkspace = localStorage.getItem('activeWorkspaceId');
-          if (savedWorkspace) {
-            api.defaults.headers.common['x-workspace-id'] = savedWorkspace;
-          }
-        } catch {
-          // Refresh failed — clear state
-          localStorage.removeItem('token');
-          localStorage.removeItem('activeWorkspaceId');
-          setToken(null);
-          setUser(null);
-          setActiveWorkspaceIdState(null);
+      try {
+        const res = await api.post('/auth/refresh', {}, { withCredentials: true });
+        const newToken = res.data.accessToken;
+        sessionStorage.setItem('accessToken', newToken);
+        setToken(newToken);
+        setUser(res.data.user);
+
+        const savedWorkspace = localStorage.getItem('activeWorkspaceId');
+        if (savedWorkspace) {
+          api.defaults.headers.common['x-workspace-id'] = savedWorkspace;
         }
+      } catch {
+        sessionStorage.removeItem('accessToken');
+        localStorage.removeItem('activeWorkspaceId');
+        setToken(null);
+        setUser(null);
+        setActiveWorkspaceIdState(null);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
+
     restore();
   }, []);
 
-  const login = useCallback(async (email: string, password: string, mfaCode?: string) => {
-    const res = await api.post('/auth/login', { email, password, mfaCode }, { withCredentials: true });
+  const login = useCallback(async (email: string, password: string, mfaCode?: string, recoveryCode?: string) => {
+    const res = await api.post('/auth/login', { email, password, mfaCode, recoveryCode }, { withCredentials: true });
     const { accessToken, user: userData, defaultWorkspaceId } = res.data;
-    localStorage.setItem('token', accessToken);
+    sessionStorage.setItem('accessToken', accessToken);
     setToken(accessToken);
     setUser(userData);
-    
-    // Automatically set the first workspace as active on login if provided
+
     if (defaultWorkspaceId || res.data.workspaceId) {
       setActiveWorkspaceId(defaultWorkspaceId || res.data.workspaceId);
     }
@@ -88,10 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (name: string, email: string, password: string, confirmPassword: string) => {
     const res = await api.post('/auth/register', { name, email, password, confirmPassword }, { withCredentials: true });
     const { accessToken, user: userData, workspaceId } = res.data;
-    localStorage.setItem('token', accessToken);
+    sessionStorage.setItem('accessToken', accessToken);
     setToken(accessToken);
     setUser(userData);
-    
+
     if (workspaceId) {
       setActiveWorkspaceId(workspaceId);
     }
@@ -100,10 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const googleLogin = useCallback(async (tokenStr: string) => {
     const res = await api.post('/auth/google', { token: tokenStr }, { withCredentials: true });
     const { accessToken, user: userData, workspaceId } = res.data;
-    localStorage.setItem('token', accessToken);
+    sessionStorage.setItem('accessToken', accessToken);
     setToken(accessToken);
     setUser(userData);
-    
+
     if (workspaceId) {
       setActiveWorkspaceId(workspaceId);
     }
@@ -113,9 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.post('/auth/logout', {}, { withCredentials: true });
     } catch {
-      // Ignore errors during logout
+      // Ignore logout transport errors and clear local state anyway.
     }
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('accessToken');
     localStorage.removeItem('activeWorkspaceId');
     delete api.defaults.headers.common['x-workspace-id'];
     setToken(null);
@@ -124,9 +115,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ 
-      user, token, activeWorkspaceId, setActiveWorkspaceId, 
-      isAuthenticated: !!user, isLoading, login, googleLogin, register, logout 
+    <AuthContext.Provider value={{
+      user,
+      token,
+      activeWorkspaceId,
+      setActiveWorkspaceId,
+      isAuthenticated: !!user,
+      isLoading,
+      login,
+      googleLogin,
+      register,
+      logout,
     }}>
       {children}
     </AuthContext.Provider>

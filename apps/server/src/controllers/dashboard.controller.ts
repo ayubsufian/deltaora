@@ -4,11 +4,18 @@ import { Diff } from '../models/Diff';
 import { AISummary } from '../models/AISummary';
 import { Notification } from '../models/Notification';
 import { redis } from '../config/redis';
+import { ForbiddenError } from '@casl/ability';
 
 export const getDashboardStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user!.userId;
-    const cacheKey = `dashboard:${userId}`;
+    const workspaceId = req.workspaceId;
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+
+    const cacheKey = `dashboard:${workspaceId}`;
 
     // Try cache first
     const cached = await redis.get(cacheKey);
@@ -27,20 +34,19 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
       summariesGenerated,
       latestNotifications
     ] = await Promise.all([
-      MonitoredPage.countDocuments({ userId }),
-      MonitoredPage.countDocuments({ userId, lastChecked: { $gte: today } }),
-      // To count diffs for user's pages, we need pageIds first
-      MonitoredPage.find({ userId }).select('_id').then(pages => {
+      MonitoredPage.countDocuments({ workspaceId }),
+      MonitoredPage.countDocuments({ workspaceId, lastChecked: { $gte: today } }),
+      MonitoredPage.find({ workspaceId }).select('_id').then(pages => {
         const pageIds = pages.map(p => p._id);
         return Diff.countDocuments({ pageId: { $in: pageIds } });
       }),
-      MonitoredPage.find({ userId }).select('_id').then(async pages => {
+      MonitoredPage.find({ workspaceId }).select('_id').then(async pages => {
         const pageIds = pages.map(p => p._id);
         const diffs = await Diff.find({ pageId: { $in: pageIds } }).select('_id');
         const diffIds = diffs.map(d => d._id);
         return AISummary.countDocuments({ diffId: { $in: diffIds } });
       }),
-      Notification.find({ userId }).sort({ createdAt: -1 }).limit(5)
+      Notification.find({ userId: req.user!.userId }).sort({ createdAt: -1 }).limit(5)
     ]);
 
     const stats = {
@@ -56,6 +62,9 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
 
     res.json(stats);
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: error.message });
+    }
     next(error);
   }
 };
