@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { MonitoredPage } from '../models/MonitoredPage';
+import mongoose from 'mongoose';
 import { Diff } from '../models/Diff';
 import { ForbiddenError } from '@casl/ability';
 
@@ -11,20 +11,14 @@ export const getTimeseriesStats = async (req: Request, res: Response, next: Next
     }
 
     ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
-
-    const workspacePages = await MonitoredPage.find({ workspaceId }).select('_id');
-    const pageIds = workspacePages.map(p => p._id);
-    
-    if (pageIds.length === 0) {
-      return res.json({ weekly: [], monthly: [] });
-    }
+    const workspaceObjectId = new mongoose.Types.ObjectId(workspaceId);
 
     // Weekly stats (last 7 days)
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
     const weeklyChanges = await Diff.aggregate([
-      { $match: { pageId: { $in: pageIds }, createdAt: { $gte: sevenDaysAgo } } },
+      { $match: { workspaceId: workspaceObjectId, createdAt: { $gte: sevenDaysAgo } } },
       { 
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -46,7 +40,7 @@ export const getTimeseriesStats = async (req: Request, res: Response, next: Next
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const monthlyChanges = await Diff.aggregate([
-      { $match: { pageId: { $in: pageIds }, createdAt: { $gte: thirtyDaysAgo } } },
+      { $match: { workspaceId: workspaceObjectId, createdAt: { $gte: thirtyDaysAgo } } },
       {
         $group: {
           _id: { $isoWeek: "$createdAt" },

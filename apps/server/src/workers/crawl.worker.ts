@@ -21,18 +21,19 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
   try {
     const page = await MonitoredPage.findById(pageId);
     if (!page) throw new Error('Page not found');
+    const workspaceId = page.workspaceId;
 
     const html = await fetchPageHTML(page.url);
     const { content, contentHash } = extractCleanText(html, page.url);
 
-    const latestSnapshot = await Snapshot.findOne({ pageId }).sort({ createdAt: -1 });
+    const latestSnapshot = await Snapshot.findOne({ pageId, workspaceId }).sort({ createdAt: -1 });
 
     if (!latestSnapshot) {
       // First time checking this page
-      await Snapshot.create({ pageId, content, contentHash });
+      await Snapshot.create({ pageId, workspaceId, content, contentHash });
     } else if (latestSnapshot.contentHash !== contentHash) {
       // Content changed!
-      const newSnapshot = await Snapshot.create({ pageId, content, contentHash });
+      const newSnapshot = await Snapshot.create({ pageId, workspaceId, content, contentHash });
       
       const diffResult = generateDiff(latestSnapshot.content, content);
       
@@ -40,6 +41,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       if (diffResult.changeScore > 0) {
         const diff = await Diff.create({
           pageId,
+          workspaceId,
           previousSnapshotId: latestSnapshot.id,
           currentSnapshotId: newSnapshot.id,
           addedText: diffResult.addedText,
@@ -48,7 +50,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
         });
 
         // Enqueue AI Summary job
-        await summaryQueue.add('summarize', { diffId: diff.id, pageId: page.id });
+        await summaryQueue.add('summarize', { diffId: diff.id, pageId: page.id, workspaceId: workspaceId.toString() });
       }
     }
 

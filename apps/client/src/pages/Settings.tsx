@@ -129,6 +129,25 @@ export function Settings() {
     }
   };
 
+  const stepUpForSensitiveAction = async (options: { requireMfa?: boolean } = {}) => {
+    const mustUseMfa = options.requireMfa || mfaEnabled || user?.role === 'admin';
+    if (mustUseMfa && !mfaEnabled) {
+      toast.error('Enable two-factor authentication before performing this action');
+      throw new Error('MFA required');
+    }
+
+    const promptLabel = mustUseMfa
+      ? 'Enter your 6-digit authentication code to continue'
+      : 'Enter your current password to continue';
+    const value = window.prompt(promptLabel);
+
+    if (!value) {
+      throw new Error('Step-up cancelled');
+    }
+
+    await api.post('/auth/step-up', mustUseMfa ? { mfaCode: value } : { currentPassword: value });
+  };
+
   const startMfaSetup = async () => {
     try {
       const res = await api.post('/auth/mfa/setup');
@@ -154,6 +173,7 @@ export function Settings() {
 
   const disableMfa = async () => {
     try {
+      await stepUpForSensitiveAction({ requireMfa: true });
       await api.post('/users/me/mfa/disable', { currentPassword });
       setMfaEnabled(false);
       setRecoveryCodes([]);
@@ -165,6 +185,7 @@ export function Settings() {
 
   const regenerateRecoveryCodes = async () => {
     try {
+      await stepUpForSensitiveAction({ requireMfa: true });
       const res = await api.post('/users/me/mfa/recovery-codes');
       setRecoveryCodes(res.data.recoveryCodes || []);
       toast.success('Recovery codes regenerated');
@@ -175,6 +196,7 @@ export function Settings() {
 
   const revokeSession = async (sessionId: string) => {
     try {
+      await stepUpForSensitiveAction();
       await api.delete(`/users/me/sessions/${sessionId}`);
       toast.success('Session revoked');
       fetchSessions();
@@ -185,6 +207,7 @@ export function Settings() {
 
   const revokeOtherSessions = async () => {
     try {
+      await stepUpForSensitiveAction();
       await api.delete('/users/me/sessions/others');
       toast.success('Other sessions revoked');
       fetchSessions();
@@ -197,6 +220,7 @@ export function Settings() {
     if (!activeWorkspaceId) return;
     setIsGeneratingInvite(true);
     try {
+      await stepUpForSensitiveAction();
       const payload: any = { role: inviteRole };
       if (inviteEmail.trim()) {
         payload.email = inviteEmail.trim();
@@ -221,6 +245,7 @@ export function Settings() {
     if (!confirm('Are you sure you want to remove this member?')) return;
     
     try {
+      await stepUpForSensitiveAction();
       await api.delete(`/workspaces/${activeWorkspaceId}/members/${userId}`);
       toast.success('Member removed');
       fetchMembers();
@@ -233,6 +258,7 @@ export function Settings() {
     if (!activeWorkspaceId) return;
     
     try {
+      await stepUpForSensitiveAction();
       await api.patch(`/workspaces/${activeWorkspaceId}/members/${userId}`, { role: newRole });
       toast.success('Role updated');
       fetchMembers();

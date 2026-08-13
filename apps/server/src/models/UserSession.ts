@@ -6,6 +6,8 @@ export interface IUserSessionDocument extends Document {
   userAgent?: string;
   ipAddress?: string;
   lastSeenAt: Date;
+  reauthenticatedAt?: Date;
+  mfaVerifiedAt?: Date;
   expiresAt: Date;
   revokedAt?: Date;
   revokedReason?: string;
@@ -20,6 +22,8 @@ const UserSessionSchema = new Schema<IUserSessionDocument>(
     userAgent: { type: String },
     ipAddress: { type: String },
     lastSeenAt: { type: Date, default: Date.now },
+    reauthenticatedAt: { type: Date },
+    mfaVerifiedAt: { type: Date },
     expiresAt: { type: Date, required: true, index: true },
     revokedAt: { type: Date },
     revokedReason: { type: String },

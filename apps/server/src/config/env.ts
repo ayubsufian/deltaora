@@ -14,8 +14,10 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1, 'Redis URL is required'),
   
   // Auth
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
-  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required'),
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
+  CSRF_SECRET: z.string().min(32, 'CSRF_SECRET must be at least 32 characters'),
+  MFA_SECRET_ENCRYPTION_KEY: z.string().min(32, 'MFA_SECRET_ENCRYPTION_KEY must be at least 32 characters'),
   GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required for SSO'),
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
   

@@ -117,8 +117,8 @@ export const getPageDetails = async (req: Request, res: Response, next: NextFunc
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    const latestSnapshot = await Snapshot.findOne({ pageId: page.id }).sort({ createdAt: -1 });
-    const latestDiff = await Diff.findOne({ pageId: page.id }).sort({ createdAt: -1 });
+    const latestSnapshot = await Snapshot.findOne({ pageId: page.id, workspaceId }).sort({ createdAt: -1 });
+    const latestDiff = await Diff.findOne({ pageId: page.id, workspaceId }).sort({ createdAt: -1 });
 
     res.json({ page, latestSnapshot, latestDiff });
   } catch (error: unknown) {

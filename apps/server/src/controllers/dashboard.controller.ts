@@ -36,16 +36,8 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
     ] = await Promise.all([
       MonitoredPage.countDocuments({ workspaceId }),
       MonitoredPage.countDocuments({ workspaceId, lastChecked: { $gte: today } }),
-      MonitoredPage.find({ workspaceId }).select('_id').then(pages => {
-        const pageIds = pages.map(p => p._id);
-        return Diff.countDocuments({ pageId: { $in: pageIds } });
-      }),
-      MonitoredPage.find({ workspaceId }).select('_id').then(async pages => {
-        const pageIds = pages.map(p => p._id);
-        const diffs = await Diff.find({ pageId: { $in: pageIds } }).select('_id');
-        const diffIds = diffs.map(d => d._id);
-        return AISummary.countDocuments({ diffId: { $in: diffIds } });
-      }),
+      Diff.countDocuments({ workspaceId }),
+      AISummary.countDocuments({ workspaceId }),
       Notification.find({ userId: req.user!.userId }).sort({ createdAt: -1 }).limit(5)
     ]);
 

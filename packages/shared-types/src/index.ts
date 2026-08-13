@@ -62,6 +62,7 @@ export interface IMonitoredPage {
 export interface ISnapshot {
   _id: string;
   pageId: string;
+  workspaceId: string;
   content: string;
   contentHash: string;
   createdAt: Date;
@@ -70,6 +71,7 @@ export interface ISnapshot {
 export interface IDiff {
   _id: string;
   pageId: string;
+  workspaceId: string;
   previousSnapshotId: string;
   currentSnapshotId: string;
   addedText: string;
@@ -81,6 +83,7 @@ export interface IDiff {
 export interface IAISummary {
   _id: string;
   diffId: string;
+  workspaceId: string;
   summary: string;
   importance: Importance;
   category: Category;

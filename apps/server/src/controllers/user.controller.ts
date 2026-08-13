@@ -87,14 +87,9 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
 export const disableMfa = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const { currentPassword } = req.body;
     const user = await User.findById(userId);
 
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.passwordHash) {
-      const isValid = await argon2.verify(user.passwordHash, currentPassword);
-      if (!isValid) return res.status(401).json({ error: 'Current password is incorrect' });
-    }
 
     user.mfaEnabled = false;
     user.mfaSecret = undefined;

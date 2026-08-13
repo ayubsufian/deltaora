@@ -54,9 +54,9 @@ export function defineAbilityFor(user: AbilityUser): AppAbility {
         // Owners have full control over their workspace and its resources
         can('manage', 'Workspace', { _id: user.workspaceId });
         can('manage', 'MonitoredPage', workspaceCondition);
-        can('read', 'Snapshot');
-        can('read', 'Diff');
-        can('read', 'AISummary');
+        can('read', 'Snapshot', workspaceCondition);
+        can('read', 'Diff', workspaceCondition);
+        can('read', 'AISummary', workspaceCondition);
         break;
 
       case 'editor':
@@ -66,18 +66,18 @@ export function defineAbilityFor(user: AbilityUser): AppAbility {
         can('read', 'MonitoredPage', workspaceCondition);
         can('update', 'MonitoredPage', workspaceCondition);
         can('delete', 'MonitoredPage', workspaceCondition);
-        can('read', 'Snapshot');
-        can('read', 'Diff');
-        can('read', 'AISummary');
+        can('read', 'Snapshot', workspaceCondition);
+        can('read', 'Diff', workspaceCondition);
+        can('read', 'AISummary', workspaceCondition);
         break;
 
       case 'viewer':
         // Viewers can only read — no mutations allowed
         can('read', 'Workspace', { _id: user.workspaceId });
         can('read', 'MonitoredPage', workspaceCondition);
-        can('read', 'Snapshot');
-        can('read', 'Diff');
-        can('read', 'AISummary');
+        can('read', 'Snapshot', workspaceCondition);
+        can('read', 'Diff', workspaceCondition);
+        can('read', 'AISummary', workspaceCondition);
         break;
     }
   }
@@ -86,9 +86,6 @@ export function defineAbilityFor(user: AbilityUser): AppAbility {
   // Users who haven't selected a workspace can still access their own data
   if (user.role === 'user' && !user.workspaceId) {
     can('manage', 'MonitoredPage', { userId: user.userId });
-    can('read', 'Snapshot');
-    can('read', 'Diff');
-    can('read', 'AISummary');
     can('read', 'Workspace');
     can('create', 'Workspace');
   }

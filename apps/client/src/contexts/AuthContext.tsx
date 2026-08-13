@@ -12,7 +12,6 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
   activeWorkspaceId: string | null;
   setActiveWorkspaceId: (id: string) => void;
   isAuthenticated: boolean;
@@ -27,7 +26,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('accessToken'));
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() => localStorage.getItem('activeWorkspaceId'));
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,9 +39,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const restore = async () => {
       try {
         const res = await api.post('/auth/refresh', {}, { withCredentials: true });
-        const newToken = res.data.accessToken;
-        sessionStorage.setItem('accessToken', newToken);
-        setToken(newToken);
         setUser(res.data.user);
 
         const savedWorkspace = localStorage.getItem('activeWorkspaceId');
@@ -51,9 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           api.defaults.headers.common['x-workspace-id'] = savedWorkspace;
         }
       } catch {
-        sessionStorage.removeItem('accessToken');
         localStorage.removeItem('activeWorkspaceId');
-        setToken(null);
         setUser(null);
         setActiveWorkspaceIdState(null);
       } finally {
@@ -66,9 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string, mfaCode?: string, recoveryCode?: string) => {
     const res = await api.post('/auth/login', { email, password, mfaCode, recoveryCode }, { withCredentials: true });
-    const { accessToken, user: userData, defaultWorkspaceId } = res.data;
-    sessionStorage.setItem('accessToken', accessToken);
-    setToken(accessToken);
+    const { user: userData, defaultWorkspaceId } = res.data;
     setUser(userData);
 
     if (defaultWorkspaceId || res.data.workspaceId) {
@@ -78,9 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(async (name: string, email: string, password: string, confirmPassword: string) => {
     const res = await api.post('/auth/register', { name, email, password, confirmPassword }, { withCredentials: true });
-    const { accessToken, user: userData, workspaceId } = res.data;
-    sessionStorage.setItem('accessToken', accessToken);
-    setToken(accessToken);
+    const { user: userData, workspaceId } = res.data;
     setUser(userData);
 
     if (workspaceId) {
@@ -90,9 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const googleLogin = useCallback(async (tokenStr: string) => {
     const res = await api.post('/auth/google', { token: tokenStr }, { withCredentials: true });
-    const { accessToken, user: userData, workspaceId } = res.data;
-    sessionStorage.setItem('accessToken', accessToken);
-    setToken(accessToken);
+    const { user: userData, workspaceId } = res.data;
     setUser(userData);
 
     if (workspaceId) {
@@ -106,10 +93,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore logout transport errors and clear local state anyway.
     }
-    sessionStorage.removeItem('accessToken');
     localStorage.removeItem('activeWorkspaceId');
     delete api.defaults.headers.common['x-workspace-id'];
-    setToken(null);
     setUser(null);
     setActiveWorkspaceIdState(null);
   }, []);
@@ -117,7 +102,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user,
-      token,
       activeWorkspaceId,
       setActiveWorkspaceId,
       isAuthenticated: !!user,

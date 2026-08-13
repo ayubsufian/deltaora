@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import {
   clearAuthCookies,
   generateTokens,
+  markSessionReauthenticated,
   REFRESH_TOKEN_COOKIE,
   revokeAllUserSessions,
   revokeRefreshToken,
@@ -22,7 +23,14 @@ import { OTP } from 'otplib';
 import QRCode from 'qrcode';
 import { OAuth2Client } from 'google-auth-library';
 import { validatePasswordPolicy } from '../services/passwordPolicy.service';
-import { generateRecoveryCodes, randomToken, sha256, verifyRecoveryCode } from '../services/security.service';
+import {
+  decryptSecret,
+  encryptSecret,
+  generateRecoveryCodes,
+  randomToken,
+  sha256,
+  verifyRecoveryCode,
+} from '../services/security.service';
 
 const otp = new OTP();
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
@@ -54,6 +62,28 @@ const clearFailedLogins = async (user: any) => {
   await user.save();
 };
 
+const verifyMfaChallenge = async (
+  user: any,
+  { mfaCode, recoveryCode }: { mfaCode?: string; recoveryCode?: string }
+) => {
+  if (!user.mfaEnabled || !user.mfaSecret) return false;
+
+  const secret = decryptSecret(user.mfaSecret);
+  const mfaResult = mfaCode
+    ? await otp.verify({ token: mfaCode, secret })
+    : { valid: false };
+  const usedRecoveryHash = !mfaResult.valid && recoveryCode
+    ? await verifyRecoveryCode(user.mfaRecoveryCodeHashes, recoveryCode)
+    : null;
+
+  if (usedRecoveryHash) {
+    user.mfaRecoveryCodeHashes = user.mfaRecoveryCodeHashes.filter((hash: string) => hash !== usedRecoveryHash);
+    await user.save();
+  }
+
+  return mfaResult.valid || !!usedRecoveryHash;
+};
+
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, password } = req.body;
@@ -81,7 +111,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     });
     await workspace.save();
 
-    const tokens = await generateTokens(user.id, user.role, req);
+    const tokens = await generateTokens(user.id, user.role, req, undefined, { markReauthenticated: true });
     setAuthCookies(res, tokens);
 
     // Generate verification token
@@ -99,7 +129,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       htmlContent: verificationEmail(verificationUrl),
     }).catch(err => console.error('Failed to send verification email:', err));
 
-    res.status(201).json({ accessToken: tokens.accessToken, user: publicUser(user), workspaceId: workspace.id });
+    res.status(201).json({ user: publicUser(user), workspaceId: workspace.id });
   } catch (error) {
     next(error);
   }
@@ -137,32 +167,25 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         return res.status(401).json({ error: 'MFA_REQUIRED', message: 'Multi-factor authentication required' });
       }
 
-      const mfaResult = mfaCode
-        ? await otp.verify({ token: mfaCode, secret: user.mfaSecret! })
-        : { valid: false };
-      const usedRecoveryHash = !mfaResult.valid && recoveryCode
-        ? await verifyRecoveryCode(user.mfaRecoveryCodeHashes, recoveryCode)
-        : null;
+      const mfaVerified = await verifyMfaChallenge(user, { mfaCode, recoveryCode });
 
-      if (!mfaResult.valid && !usedRecoveryHash) {
+      if (!mfaVerified) {
         await recordFailedLogin(user);
         return res.status(401).json({ error: 'INVALID_MFA', message: 'Invalid authentication code' });
-      }
-
-      if (usedRecoveryHash) {
-        user.mfaRecoveryCodeHashes = user.mfaRecoveryCodeHashes.filter((hash: string) => hash !== usedRecoveryHash);
       }
     }
 
     await clearFailedLogins(user);
-    const tokens = await generateTokens(user.id, user.role, req);
+    const tokens = await generateTokens(user.id, user.role, req, undefined, {
+      markReauthenticated: true,
+      markMfaVerified: user.mfaEnabled,
+    });
     setAuthCookies(res, tokens);
 
     // Return default workspace on login
     const workspace = await Workspace.findOne({ 'members.userId': user._id });
 
     res.status(200).json({ 
-      accessToken: tokens.accessToken,
       user: publicUser(user),
       defaultWorkspaceId: workspace?.id
     });
@@ -202,7 +225,7 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
     const tokens = await generateTokens(user.id, user.role, req, decoded.sessionId);
     setAuthCookies(res, tokens);
 
-    res.json({ accessToken: tokens.accessToken, user: publicUser(user) });
+    res.json({ user: publicUser(user) });
   } catch (error) {
     return res.status(401).json({ error: 'Unauthorized: Invalid refresh token' });
   }
@@ -247,7 +270,7 @@ export const setupMfa = async (req: Request, res: Response, next: NextFunction) 
     });
     
     // Save secret temporarily (not fully enabled until verified)
-    user.mfaSecret = secret;
+    user.mfaSecret = encryptSecret(secret);
     await user.save();
 
     const qrCodeImage = await QRCode.toDataURL(otpauthUrl);
@@ -270,7 +293,7 @@ export const verifyMfa = async (req: Request, res: Response, next: NextFunction)
       return res.status(400).json({ error: 'MFA setup has not been initiated' });
     }
 
-    const mfaResult = await otp.verify({ token: code, secret: user.mfaSecret });
+    const mfaResult = await otp.verify({ token: code, secret: decryptSecret(user.mfaSecret) });
     
     if (!mfaResult.valid) {
       return res.status(400).json({ error: 'Invalid authentication code' });
@@ -280,8 +303,54 @@ export const verifyMfa = async (req: Request, res: Response, next: NextFunction)
     user.mfaEnabled = true;
     user.mfaRecoveryCodeHashes = hashes;
     await user.save();
+    if (req.user?.sessionId) {
+      await markSessionReauthenticated(user.id, req.user.sessionId, { mfaVerified: true });
+    }
 
     res.json({ message: 'MFA enabled successfully', recoveryCodes: codes });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const stepUp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    const sessionId = req.user?.sessionId;
+    const { currentPassword, mfaCode, recoveryCode } = req.body;
+
+    if (!userId || !sessionId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user || user.status !== 'active') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    let mfaVerified = false;
+    if (user.mfaEnabled) {
+      mfaVerified = await verifyMfaChallenge(user, { mfaCode, recoveryCode });
+      if (!mfaVerified) {
+        return res.status(401).json({ error: 'Invalid authentication code', code: 'INVALID_MFA' });
+      }
+    } else {
+      if (!user.passwordHash || !currentPassword) {
+        return res.status(400).json({
+          error: 'Enable MFA or use a password-backed account to perform sensitive actions',
+          code: 'STEP_UP_UNAVAILABLE',
+        });
+      }
+
+      const isValid = await argon2.verify(user.passwordHash, currentPassword);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Current password is incorrect', code: 'INVALID_PASSWORD' });
+      }
+    }
+
+    await markSessionReauthenticated(user.id, sessionId, { mfaVerified });
+
+    res.json({ message: 'Re-authentication successful', mfaVerified });
   } catch (error) {
     next(error);
   }
@@ -479,11 +548,10 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
 
     user.lastLoginAt = new Date();
     await user.save();
-    const tokens = await generateTokens(user.id, user.role, req);
+    const tokens = await generateTokens(user.id, user.role, req, undefined, { markReauthenticated: true });
     setAuthCookies(res, tokens);
 
     res.json({ 
-      accessToken: tokens.accessToken,
       user: publicUser(user),
       workspaceId
     });

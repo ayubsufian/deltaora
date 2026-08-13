@@ -26,7 +26,8 @@ router.use(resolveAbility);
  *     summary: Get all monitored pages for the current user
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     responses:
  *       200:
  *         description: List of monitored pages
@@ -40,7 +41,8 @@ router.get('/', getPages);
  *     summary: Add a new page to monitor
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     requestBody:
  *       required: true
  *       content:
@@ -72,7 +74,8 @@ router.post('/', validate(createPageSchema), createPage);
  *     summary: Get page details including recent snapshots and diffs
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -92,7 +95,8 @@ router.get('/:id', getPageDetails);
  *     summary: Update a monitored page
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -118,7 +122,8 @@ router.put('/:id', validate(updatePageSchema), updatePage);
  *     summary: Delete a monitored page
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -138,7 +143,8 @@ router.delete('/:id', deletePage);
  *     summary: Toggle page monitoring status (active/paused)
  *     tags: [Pages]
  *     security:
- *       - bearerAuth: []
+ *       - cookieAuth: []
+ *       - csrfToken: []
  *     parameters:
  *       - in: path
  *         name: id

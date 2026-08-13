@@ -9,27 +9,35 @@ import './config/redis'; // Initialize Redis
 
 import routes from './routes';
 import { errorHandler } from './middleware/errorHandler';
+import { csrfProtection } from './middleware/csrf';
 import { initializeWorkers } from './workers';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 
 const app = express();
 
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: env.NODE_ENV === 'production' ? 'https://deltaora.com' : 'http://localhost:5173',
+  origin: env.CLIENT_URL,
   credentials: true,
 }));
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+app.use('/api/v1', csrfProtection);
 
 // API Documentation (Swagger)
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  explorer: true,
-  customSiteTitle: 'Deltaora API Documentation',
-}));
+if (env.NODE_ENV !== 'production') {
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    explorer: true,
+    customSiteTitle: 'Deltaora API Documentation',
+  }));
+}
 
 // Routes
 app.get('/health', (req, res) => {

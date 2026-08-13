@@ -13,15 +13,16 @@ const verifyPageAccess = async (req: Request, pageId: string) => {
 
   const page = await MonitoredPage.findOne({ _id: pageId, workspaceId });
   if (!page) throw new Error('Unauthorized or Page not found');
-  return page;
+  return { page, workspaceId };
 };
 
 export const getSnapshots = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { pageId } = req.params;
-    await verifyPageAccess(req, pageId);
+    const { workspaceId } = await verifyPageAccess(req, pageId);
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'Snapshot');
 
-    const snapshots = await Snapshot.find({ pageId }).sort({ createdAt: -1 });
+    const snapshots = await Snapshot.find({ pageId, workspaceId }).sort({ createdAt: -1 });
     res.json(snapshots);
   } catch (error) {
     res.status(403).json({ error: (error as Error).message });
@@ -31,9 +32,10 @@ export const getSnapshots = async (req: Request, res: Response, next: NextFuncti
 export const getDiffs = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { pageId } = req.params;
-    await verifyPageAccess(req, pageId);
+    const { workspaceId } = await verifyPageAccess(req, pageId);
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'Diff');
 
-    const diffs = await Diff.find({ pageId }).sort({ createdAt: -1 });
+    const diffs = await Diff.find({ pageId, workspaceId }).sort({ createdAt: -1 });
     res.json(diffs);
   } catch (error) {
     res.status(403).json({ error: (error as Error).message });
@@ -43,13 +45,14 @@ export const getDiffs = async (req: Request, res: Response, next: NextFunction) 
 export const getSummaries = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { pageId } = req.params;
-    await verifyPageAccess(req, pageId);
+    const { workspaceId } = await verifyPageAccess(req, pageId);
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'AISummary');
 
     // Get all diffs for the page first
-    const diffs = await Diff.find({ pageId }).select('_id');
+    const diffs = await Diff.find({ pageId, workspaceId }).select('_id');
     const diffIds = diffs.map(d => d._id);
 
-    const summaries = await AISummary.find({ diffId: { $in: diffIds } }).sort({ createdAt: -1 });
+    const summaries = await AISummary.find({ workspaceId, diffId: { $in: diffIds } }).sort({ createdAt: -1 });
     res.json(summaries);
   } catch (error) {
     res.status(403).json({ error: (error as Error).message });

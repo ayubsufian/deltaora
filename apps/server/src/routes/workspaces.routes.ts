@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getMembers, generateInvite, joinWorkspace, updateMemberRole, removeMember, getAuditLogs } from '../controllers/workspaces.controller';
-import { requireAuth, requireVerifiedEmail } from '../middleware/auth';
+import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { z } from 'zod';
@@ -21,16 +21,18 @@ router.get('/:id/audit-logs', getAuditLogs);
 
 router.post(
   '/:id/invites',
+  requireRecentStepUp(),
   validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().email().optional() })),
   generateInvite
 );
 
 router.patch(
   '/:id/members/:userId',
+  requireRecentStepUp(),
   validate(z.object({ role: z.enum(['owner', 'editor', 'viewer']) })),
   updateMemberRole
 );
 
-router.delete('/:id/members/:userId', removeMember);
+router.delete('/:id/members/:userId', requireRecentStepUp(), removeMember);
 
 export default router;

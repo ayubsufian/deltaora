@@ -12,7 +12,8 @@ import {
   setUserStatus,
   updatePreferences,
 } from '../controllers/user.controller';
-import { requireAuth, requireVerifiedEmail } from '../middleware/auth';
+import { requireAdminMfa, requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
+import { authorize, resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { z } from 'zod';
 
@@ -30,18 +31,23 @@ router.post(
 );
 router.post(
   '/me/mfa/disable',
+  requireRecentStepUp({ requireMfa: true }),
   validate(z.object({ currentPassword: z.string().min(1).optional() })),
   disableMfa
 );
-router.post('/me/mfa/recovery-codes', regenerateMfaRecoveryCodes);
+router.post('/me/mfa/recovery-codes', requireRecentStepUp({ requireMfa: true }), regenerateMfaRecoveryCodes);
 router.get('/me/sessions', listSessions);
-router.delete('/me/sessions/others', revokeOtherSessions);
-router.delete('/me/sessions/:sessionId', revokeSession);
+router.delete('/me/sessions/others', requireRecentStepUp(), revokeOtherSessions);
+router.delete('/me/sessions/:sessionId', requireRecentStepUp(), revokeSession);
 router.get('/me/export', exportAccountData);
-router.delete('/me', deleteAccount);
+router.delete('/me', requireRecentStepUp(), deleteAccount);
 
 router.patch(
   '/:userId/status',
+  requireAdminMfa,
+  resolveAbility,
+  authorize('manage', 'User'),
+  requireRecentStepUp({ requireMfa: true }),
   validate(z.object({ status: z.enum(['active', 'suspended']) })),
   setUserStatus
 );

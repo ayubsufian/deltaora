@@ -18,7 +18,20 @@ coverage/
 # Caching & IDE
 .vite/
 .eslintcache
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 .idea/
 .vscode/
 *.swp
+*.swo
+*~
+.turbo/
+.cache/
+
+# Security — never commit keys or certs
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Docker
+docker-compose.override.yml

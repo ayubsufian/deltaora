@@ -29,14 +29,14 @@ const options: swaggerJsdoc.Options = {
         cookieAuth: {
           type: 'apiKey',
           in: 'cookie',
-          name: 'refreshToken',
-          description: 'Refresh token stored securely in an HTTP-only cookie.',
+          name: env.NODE_ENV === 'production' ? '__Host-deltaora-access' : 'deltaora.accessToken',
+          description: 'Access token stored in an HTTP-only cookie.',
         },
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'Short-lived access token sent in the Authorization header.',
+        csrfToken: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-csrf-token',
+          description: 'Signed CSRF token returned by GET /auth/csrf and mirrored from the CSRF cookie.',
         },
       },
       schemas: {
@@ -60,7 +60,8 @@ const options: swaggerJsdoc.Options = {
     },
     security: [
       {
-        bearerAuth: [],
+        cookieAuth: [],
+        csrfToken: [],
       },
     ],
   },

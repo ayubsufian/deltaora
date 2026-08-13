@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { register, login, refresh, logout, setupMfa, verifyMfa, forgotPassword, resetPassword, sendVerificationEmail, verifyEmail, googleLogin } from '../controllers/auth.controller';
+import { register, login, refresh, logout, setupMfa, verifyMfa, stepUp, forgotPassword, resetPassword, sendVerificationEmail, verifyEmail, googleLogin } from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
 import { requireAuth } from '../middleware/auth';
+import { issueCsrfToken } from '../middleware/csrf';
 import { registerSchema, loginSchema } from '@deltaora/validation';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -25,6 +26,7 @@ const authLimiter = rateLimit({
  */
 
 router.post('/register', authLimiter, validate(registerSchema), register);
+router.get('/csrf', issueCsrfToken);
 
 // Accept optional mfaCode for 2FA
 const mfaLoginSchema = loginSchema.extend({
@@ -66,6 +68,11 @@ router.post('/logout', logout);
 // ── MFA Routes ──
 router.post('/mfa/setup', requireAuth, setupMfa);
 router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().length(6) })), verifyMfa);
+router.post('/step-up', requireAuth, validate(z.object({
+  currentPassword: z.string().optional(),
+  mfaCode: z.string().optional(),
+  recoveryCode: z.string().optional(),
+})), stepUp);
 
 // ── Account Recovery ──
 router.post('/forgot-password', authLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);

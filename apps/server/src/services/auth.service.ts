@@ -1,19 +1,24 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { redis } from '../config/redis';
-import { Request, Response } from 'express';
+import { CookieOptions, Request, Response } from 'express';
 import { UserSession } from '../models/UserSession';
-import { getRequestIp, sha256 } from './security.service';
+import { generateCsrfToken, getRequestIp, sha256 } from './security.service';
 
-export const ACCESS_TOKEN_COOKIE = 'accessToken';
-export const REFRESH_TOKEN_COOKIE = 'refreshToken';
+const production = env.NODE_ENV === 'production';
+
+export const ACCESS_TOKEN_COOKIE = production ? '__Host-deltaora-access' : 'deltaora.accessToken';
+export const REFRESH_TOKEN_COOKIE = production ? '__Host-deltaora-refresh' : 'deltaora.refreshToken';
+export const CSRF_COOKIE = production ? '__Host-deltaora-csrf' : 'deltaora.csrfToken';
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const STEP_UP_TTL_MS = 10 * 60 * 1000;
 
 export interface AccessTokenPayload {
   userId: string;
   role: string;
   sessionId: string;
+  mfaEnabled?: boolean;
 }
 
 export interface RefreshTokenPayload {
@@ -21,37 +26,54 @@ export interface RefreshTokenPayload {
   sessionId: string;
 }
 
+const baseCookieOptions = (): CookieOptions => ({
+  secure: production,
+  sameSite: 'strict',
+  path: '/',
+});
+
+export const setCsrfCookie = (res: Response) => {
+  const csrfToken = generateCsrfToken();
+  res.cookie(CSRF_COOKIE, csrfToken, {
+    ...baseCookieOptions(),
+    httpOnly: false,
+    maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
+  });
+  return csrfToken;
+};
+
 export const setAuthCookies = (
   res: Response,
   { accessToken, refreshToken }: { accessToken: string; refreshToken: string }
 ) => {
-  const secure = env.NODE_ENV === 'production';
-
   res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
+    ...baseCookieOptions(),
     httpOnly: true,
-    secure,
-    sameSite: 'strict',
     maxAge: ACCESS_TOKEN_TTL_SECONDS * 1000,
   });
 
   res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
+    ...baseCookieOptions(),
     httpOnly: true,
-    secure,
-    sameSite: 'strict',
     maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
   });
+
+  setCsrfCookie(res);
 };
 
 export const clearAuthCookies = (res: Response) => {
-  res.clearCookie(ACCESS_TOKEN_COOKIE);
-  res.clearCookie(REFRESH_TOKEN_COOKIE);
+  const clearOptions = baseCookieOptions();
+  res.clearCookie(ACCESS_TOKEN_COOKIE, clearOptions);
+  res.clearCookie(REFRESH_TOKEN_COOKIE, clearOptions);
+  res.clearCookie(CSRF_COOKIE, clearOptions);
 };
 
 export const generateTokens = async (
   userId: string,
   role: string,
   req?: Request,
-  existingSessionId?: string
+  existingSessionId?: string,
+  options: { markReauthenticated?: boolean; markMfaVerified?: boolean } = {}
 ) => {
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
   let sessionId = existingSessionId;
@@ -64,6 +86,8 @@ export const generateTokens = async (
       ipAddress: getRequestIp(req),
       expiresAt,
       lastSeenAt: new Date(),
+      reauthenticatedAt: options.markReauthenticated ? new Date() : undefined,
+      mfaVerifiedAt: options.markMfaVerified ? new Date() : undefined,
     });
     sessionId = session.id;
   }
@@ -87,6 +111,8 @@ export const generateTokens = async (
         lastSeenAt: new Date(),
         userAgent: req?.headers['user-agent'],
         ipAddress: getRequestIp(req),
+        ...(options.markReauthenticated ? { reauthenticatedAt: new Date() } : {}),
+        ...(options.markMfaVerified ? { mfaVerifiedAt: new Date() } : {}),
       },
     }
   );
@@ -124,4 +150,21 @@ export const revokeAllUserSessions = async (userId: string, reason: string) => {
   if (sessions.length > 0) {
     await redis.del(...sessions.map(session => `refresh_token:${session.id}`));
   }
+};
+
+export const markSessionReauthenticated = async (
+  userId: string,
+  sessionId: string,
+  options: { mfaVerified?: boolean } = {}
+) => {
+  const now = new Date();
+  await UserSession.updateOne(
+    { _id: sessionId, userId, revokedAt: { $exists: false }, expiresAt: { $gt: now } },
+    {
+      $set: {
+        reauthenticatedAt: now,
+        ...(options.mfaVerified ? { mfaVerifiedAt: now } : {}),
+      },
+    }
+  );
 };

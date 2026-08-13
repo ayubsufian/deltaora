@@ -9,15 +9,17 @@ export const notificationQueue = new Queue('notificationQueue', {
 });
 
 export const summaryWorker = new Worker('summaryQueue', async job => {
-  const { diffId, pageId } = job.data;
+  const { diffId, pageId, workspaceId: queuedWorkspaceId } = job.data;
 
   const diff = await Diff.findById(diffId);
   if (!diff) throw new Error('Diff not found');
+  const workspaceId = queuedWorkspaceId || diff.workspaceId;
 
   const { summary, importance, category } = await generateSummary(diff.addedText, diff.removedText);
 
   const aiSummary = await AISummary.create({
     diffId,
+    workspaceId,
     summary,
     importance,
     category

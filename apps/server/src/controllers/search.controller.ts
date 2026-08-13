@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { MonitoredPage } from '../models/MonitoredPage';
 import { AISummary } from '../models/AISummary';
-import { Diff } from '../models/Diff';
 import { redis } from '../config/redis';
 import { ForbiddenError } from '@casl/ability';
 
@@ -38,15 +37,8 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
       ]
     }).limit(10);
 
-    // Find Summaries (requires joining through Diffs and Pages)
-    const workspacePages = await MonitoredPage.find({ workspaceId }).select('_id');
-    const pageIds = workspacePages.map(p => p._id);
-    
-    const diffs = await Diff.find({ pageId: { $in: pageIds } }).select('_id');
-    const diffIds = diffs.map(d => d._id);
-
     const summaries = await AISummary.find({
-      diffId: { $in: diffIds },
+      workspaceId,
       summary: { $regex: query, $options: 'i' }
     }).limit(10);
 
