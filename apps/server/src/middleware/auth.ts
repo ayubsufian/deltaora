@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ACCESS_TOKEN_COOKIE, STEP_UP_TTL_MS, verifyAccessToken } from '../services/auth.service';
 import { UserSession } from '../models/UserSession';
 import { User } from '../models/User';
+import { PasskeyCredential } from '../models/PasskeyCredential';
 
 declare global {
   namespace Express {
@@ -33,6 +34,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
         userId: decoded.userId,
         revokedAt: { $exists: false },
         expiresAt: { $gt: new Date() },
+        absoluteExpiresAt: { $gt: new Date() },
       }).select('_id'),
     ]);
 
@@ -71,15 +73,22 @@ export const requireVerifiedEmail = async (req: Request, res: Response, next: Ne
   }
 };
 
-export const requireAdminMfa = (req: Request, res: Response, next: NextFunction) => {
-  if (req.user?.role === 'admin' && !req.user.mfaEnabled) {
-    return res.status(403).json({
-      error: 'Admin accounts must enable MFA before using privileged actions',
-      code: 'ADMIN_MFA_REQUIRED',
-    });
-  }
+export const requireAdminMfa = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role === 'admin' && !req.user.mfaEnabled) {
+      const hasPasskey = await PasskeyCredential.exists({ userId: req.user.userId });
+      if (!hasPasskey) {
+        return res.status(403).json({
+          error: 'Admin accounts must enable MFA or register a passkey before using privileged actions',
+          code: 'ADMIN_STRONG_AUTH_REQUIRED',
+        });
+      }
+    }
 
-  next();
+    next();
+  } catch (error) {
+    next(error);
+  }
 };
 
 export const requireRecentStepUp = (options: { requireMfa?: boolean } = {}) => {
@@ -94,6 +103,7 @@ export const requireRecentStepUp = (options: { requireMfa?: boolean } = {}) => {
         userId: req.user.userId,
         revokedAt: { $exists: false },
         expiresAt: { $gt: new Date() },
+        absoluteExpiresAt: { $gt: new Date() },
       }).select('reauthenticatedAt mfaVerifiedAt');
 
       const stepUpAt = options.requireMfa ? session?.mfaVerifiedAt : session?.reauthenticatedAt;

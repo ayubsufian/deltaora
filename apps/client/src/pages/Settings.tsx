@@ -5,6 +5,7 @@ import { Input } from '../components/ui/Input';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/axios';
 import toast from 'react-hot-toast';
+import { startRegistration } from '@simplewebauthn/browser';
 
 interface Member {
   id: string;
@@ -32,8 +33,17 @@ interface Session {
   current: boolean;
 }
 
+interface Passkey {
+  id: string;
+  name?: string;
+  deviceType?: string;
+  backedUp: boolean;
+  lastUsedAt?: string;
+  createdAt: string;
+}
+
 export function Settings() {
-  const { user, activeWorkspaceId } = useAuth();
+  const { user, activeWorkspaceId, updateUser } = useAuth();
   
   // MFA State
   const [isSettingUpMfa, setIsSettingUpMfa] = useState(false);
@@ -45,6 +55,9 @@ export function Settings() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [profileName, setProfileName] = useState(user?.name || '');
+  const [profileEmail, setProfileEmail] = useState(user?.email || '');
 
   // Team State
   const [members, setMembers] = useState<Member[]>([]);
@@ -67,7 +80,13 @@ export function Settings() {
     }
     fetchEmailPreferences();
     fetchSessions();
+    fetchPasskeys();
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    setProfileName(user?.name || '');
+    setProfileEmail(user?.email || '');
+  }, [user]);
 
   const fetchEmailPreferences = async () => {
     try {
@@ -129,6 +148,22 @@ export function Settings() {
     }
   };
 
+  const saveProfile = async () => {
+    try {
+      await stepUpForSensitiveAction();
+      const res = await api.patch('/users/me', {
+        name: profileName,
+        email: profileEmail,
+      });
+      if (res.data.user) {
+        updateUser(res.data.user);
+      }
+      toast.success(res.data.user?.isEmailVerified === false ? 'Profile saved. Please verify your new email.' : 'Profile saved');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to save profile');
+    }
+  };
+
   const stepUpForSensitiveAction = async (options: { requireMfa?: boolean } = {}) => {
     const mustUseMfa = options.requireMfa || mfaEnabled || user?.role === 'admin';
     if (mustUseMfa && !mfaEnabled) {
@@ -168,6 +203,40 @@ export function Settings() {
       toast.success('Multi-Factor Authentication enabled successfully!');
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Invalid verification code');
+    }
+  };
+
+  const fetchPasskeys = async () => {
+    try {
+      const res = await api.get('/users/me/passkeys');
+      setPasskeys(res.data || []);
+    } catch {
+      // Ignore until the account is fully verified.
+    }
+  };
+
+  const addPasskey = async () => {
+    try {
+      await stepUpForSensitiveAction();
+      const optionsRes = await api.post('/auth/passkeys/register/options');
+      const credential = await startRegistration({ optionsJSON: optionsRes.data } as any);
+      const name = window.prompt('Name this passkey', 'My device') || undefined;
+      await api.post('/auth/passkeys/register/verify', { credential, name });
+      toast.success('Passkey added');
+      fetchPasskeys();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to add passkey');
+    }
+  };
+
+  const deletePasskey = async (passkeyId: string) => {
+    try {
+      await stepUpForSensitiveAction();
+      await api.delete(`/users/me/passkeys/${passkeyId}`);
+      toast.success('Passkey deleted');
+      fetchPasskeys();
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to delete passkey');
     }
   };
 
@@ -286,10 +355,10 @@ export function Settings() {
         <div className="md:col-span-2">
           <Card>
             <CardContent className="space-y-4 pt-6">
-              <Input label="Name" defaultValue={user?.name || ''} />
-              <Input label="Email" type="email" defaultValue={user?.email || ''} />
+              <Input label="Name" value={profileName} onChange={(e) => setProfileName(e.target.value)} />
+              <Input label="Email" type="email" value={profileEmail} onChange={(e) => setProfileEmail(e.target.value)} />
               <div className="pt-4 flex justify-end">
-                <Button>Save Changes</Button>
+                <Button onClick={saveProfile} disabled={!profileName || !profileEmail}>Save Changes</Button>
               </div>
             </CardContent>
           </Card>
@@ -486,6 +555,35 @@ export function Settings() {
                   )}
                 </div>
               )}
+
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium text-gray-900 dark:text-white">Passkeys</h4>
+                    <p className="text-sm text-gray-500">Use a device passkey for phishing-resistant sign-in.</p>
+                  </div>
+                  <Button variant="outline" onClick={addPasskey}>Add Passkey</Button>
+                </div>
+                <div className="space-y-2">
+                  {passkeys.map(passkey => (
+                    <div key={passkey.id} className="flex items-center justify-between rounded-md border p-3 dark:border-gray-800">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {passkey.name || passkey.deviceType || 'Passkey'}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Added {new Date(passkey.createdAt).toLocaleDateString()}
+                          {passkey.lastUsedAt ? ` · Last used ${new Date(passkey.lastUsedAt).toLocaleString()}` : ''}
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => deletePasskey(passkey.id)}>Delete</Button>
+                    </div>
+                  ))}
+                  {passkeys.length === 0 && (
+                    <p className="text-sm text-gray-500">No passkeys added yet.</p>
+                  )}
+                </div>
+              </div>
 
               <div className="border-t border-gray-200 dark:border-gray-800 pt-4 space-y-3">
                 <h4 className="font-medium text-gray-900 dark:text-white">Password</h4>

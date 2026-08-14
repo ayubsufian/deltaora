@@ -2,8 +2,8 @@ import { AuditLog } from '../models/AuditLog';
 import { Request } from 'express';
 
 interface LogEventOptions {
-  workspaceId: string;
-  actorId: string;
+  workspaceId?: string;
+  actorId?: string;
   action: string;
   resourceId?: string;
   metadata?: Record<string, any>;
@@ -23,13 +23,17 @@ export const logAuditEvent = async ({
 }: LogEventOptions) => {
   try {
     const ipAddress = req?.ip || req?.headers['x-forwarded-for'] || 'unknown';
+    const userAgent = req?.headers['user-agent'];
 
     const log = new AuditLog({
       workspaceId,
       actorId,
       action,
       resourceId,
-      metadata,
+      metadata: {
+        ...metadata,
+        ...(userAgent ? { userAgent } : {}),
+      },
       ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
     });
 
@@ -39,3 +43,8 @@ export const logAuditEvent = async ({
     console.error('Error in logAuditEvent:', error);
   }
 };
+
+export const logAuthEvent = async (
+  action: string,
+  options: Omit<LogEventOptions, 'action'> = {}
+) => logAuditEvent({ ...options, action });

@@ -33,11 +33,12 @@ export const resolveAbility = async (req: Request, res: Response, next: NextFunc
     let workspaceId: string | undefined;
     let workspaceRole: WorkspaceRole | undefined;
 
-    // Try to resolve workspace from header
+    // Prefer route-bound workspace ids, then the active workspace header.
     const headerWorkspaceId = req.headers['x-workspace-id'] as string;
+    const requestedWorkspaceId = req.params?.id || req.params?.workspaceId;
 
-    if (headerWorkspaceId) {
-      const workspace = await Workspace.findById(headerWorkspaceId);
+    if (requestedWorkspaceId || headerWorkspaceId) {
+      const workspace = await Workspace.findById(requestedWorkspaceId || headerWorkspaceId);
       if (workspace) {
         const member = workspace.members.find(m => m.userId.toString() === userId);
         if (member) {

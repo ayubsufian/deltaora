@@ -20,6 +20,8 @@ const envSchema = z.object({
   MFA_SECRET_ENCRYPTION_KEY: z.string().min(32, 'MFA_SECRET_ENCRYPTION_KEY must be at least 32 characters'),
   GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required for SSO'),
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
+  WEBAUTHN_RP_ID: z.string().optional(),
+  WEBAUTHN_ORIGIN: z.string().url().optional(),
   
   // AI API Key
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),

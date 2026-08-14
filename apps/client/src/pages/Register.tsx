@@ -21,7 +21,12 @@ export function Register() {
 
   const onSubmit = async (data: RegisterForm) => {
     try {
-      await registerUser(data.name, data.email, data.password, data.confirmPassword);
+      const result = await registerUser(data.name, data.email, data.password, data.confirmPassword);
+      if (result?.message) {
+        toast.success(result.message);
+        navigate('/login');
+        return;
+      }
       toast.success('Account created! Please check your email to verify.');
       navigate('/dashboard');
     } catch (error: any) {

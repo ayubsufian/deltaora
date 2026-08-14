@@ -1,7 +1,24 @@
 import { Router } from 'express';
-import { register, login, refresh, logout, setupMfa, verifyMfa, stepUp, forgotPassword, resetPassword, sendVerificationEmail, verifyEmail, googleLogin } from '../controllers/auth.controller';
+import {
+  register,
+  login,
+  refresh,
+  logout,
+  setupMfa,
+  verifyMfa,
+  stepUp,
+  forgotPassword,
+  resetPassword,
+  sendVerificationEmail,
+  verifyEmail,
+  googleLogin,
+  startPasskeyRegistration,
+  verifyPasskeyRegistration,
+  startPasskeyAuthentication,
+  verifyPasskeyAuthentication,
+} from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { issueCsrfToken } from '../middleware/csrf';
 import { registerSchema, loginSchema } from '@deltaora/validation';
 import rateLimit from 'express-rate-limit';
@@ -66,7 +83,7 @@ router.post('/refresh', refresh);
 router.post('/logout', logout);
 
 // ── MFA Routes ──
-router.post('/mfa/setup', requireAuth, setupMfa);
+router.post('/mfa/setup', requireAuth, requireRecentStepUp(), setupMfa);
 router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().length(6) })), verifyMfa);
 router.post('/step-up', requireAuth, validate(z.object({
   currentPassword: z.string().optional(),
@@ -82,5 +99,28 @@ router.post('/reset-password', authLimiter, validate(z.object({ token: z.string(
 router.post('/send-verification', requireAuth, sendVerificationEmail);
 router.post('/verify-email', validate(z.object({ token: z.string() })), verifyEmail);
 router.post('/google', validate(z.object({ token: z.string() })), googleLogin);
+
+// Passkeys / phishing-resistant MFA
+router.post('/passkeys/register/options', requireAuth, requireVerifiedEmail, requireRecentStepUp(), startPasskeyRegistration);
+router.post(
+  '/passkeys/register/verify',
+  requireAuth,
+  requireVerifiedEmail,
+  requireRecentStepUp(),
+  validate(z.object({ credential: z.any(), name: z.string().max(80).optional() })),
+  verifyPasskeyRegistration
+);
+router.post(
+  '/passkeys/authenticate/options',
+  authLimiter,
+  validate(z.object({ email: z.string().email() })),
+  startPasskeyAuthentication
+);
+router.post(
+  '/passkeys/authenticate/verify',
+  authLimiter,
+  validate(z.object({ credential: z.any() })),
+  verifyPasskeyAuthentication
+);
 
 export default router;

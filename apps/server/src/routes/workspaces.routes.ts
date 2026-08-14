@@ -13,14 +13,12 @@ router.use(requireVerifiedEmail);
 // Join workspace doesn't need resolveAbility because they aren't in the workspace yet
 router.post('/join', validate(z.object({ inviteToken: z.string() })), joinWorkspace);
 
-// All other routes require workspace context
-router.use(resolveAbility);
-
-router.get('/:id/members', getMembers);
-router.get('/:id/audit-logs', getAuditLogs);
+router.get('/:id/members', resolveAbility, getMembers);
+router.get('/:id/audit-logs', resolveAbility, getAuditLogs);
 
 router.post(
   '/:id/invites',
+  resolveAbility,
   requireRecentStepUp(),
   validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().email().optional() })),
   generateInvite
@@ -28,11 +26,12 @@ router.post(
 
 router.patch(
   '/:id/members/:userId',
+  resolveAbility,
   requireRecentStepUp(),
   validate(z.object({ role: z.enum(['owner', 'editor', 'viewer']) })),
   updateMemberRole
 );
 
-router.delete('/:id/members/:userId', requireRecentStepUp(), removeMember);
+router.delete('/:id/members/:userId', resolveAbility, requireRecentStepUp(), removeMember);
 
 export default router;

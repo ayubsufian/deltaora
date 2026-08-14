@@ -20,10 +20,10 @@ type LoginForm = z.infer<typeof mfaLoginSchema>;
 
 export function Login() {
   const navigate = useNavigate();
-  const { login, googleLogin } = useAuth();
+  const { login, passkeyLogin, googleLogin } = useAuth();
   const [requiresMfa, setRequiresMfa] = useState(false);
   
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
+  const { register, handleSubmit, getValues, formState: { errors, isSubmitting } } = useForm<LoginForm>({
     resolver: zodResolver(mfaLoginSchema),
   });
 
@@ -40,6 +40,22 @@ export function Login() {
       } else {
         toast.error(errRes?.message || errRes?.error || 'Invalid email or password');
       }
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    const email = getValues('email');
+    if (!email) {
+      toast.error('Enter your email first');
+      return;
+    }
+
+    try {
+      await passkeyLogin(email);
+      toast.success('Logged in with passkey');
+      navigate('/dashboard');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Passkey sign-in failed');
     }
   };
 
@@ -79,6 +95,9 @@ export function Login() {
                   width="100%"
                 />
               </div>
+              <Button type="button" variant="outline" className="w-full" onClick={handlePasskeyLogin}>
+                Sign in with passkey
+              </Button>
               
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">

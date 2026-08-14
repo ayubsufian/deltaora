@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 const COMMON_PASSWORDS = new Set([
   'password',
   'password1',
@@ -12,7 +14,16 @@ const COMMON_PASSWORDS = new Set([
   'changeme',
   'iloveyou',
   'deltaora',
+  'deltaora123',
+  'deltaoradeltaora',
+  'changeme123',
+  'defaultpassword',
+  'newpassword',
+  'newpassword123',
+  'passwordpassword',
 ]);
+
+const PWNED_PASSWORDS_RANGE_URL = 'https://api.pwnedpasswords.com/range';
 
 interface PasswordPolicyContext {
   email?: string;
@@ -20,10 +31,28 @@ interface PasswordPolicyContext {
   requireMfaBoundMinimum?: boolean;
 }
 
-export const validatePasswordPolicy = (
+const hasCompromisedPasswordMatch = async (password: string) => {
+  const hash = crypto.createHash('sha1').update(password, 'utf8').digest('hex').toUpperCase();
+  const prefix = hash.slice(0, 5);
+  const suffix = hash.slice(5);
+
+  const response = await fetch(`${PWNED_PASSWORDS_RANGE_URL}/${prefix}`, {
+    headers: { 'Add-Padding': 'true' },
+    signal: AbortSignal.timeout(3000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Compromised password check failed with status ${response.status}`);
+  }
+
+  const body = await response.text();
+  return body.split('\n').some(line => line.split(':')[0].trim().toUpperCase() === suffix);
+};
+
+export const validatePasswordPolicy = async (
   password: string,
   context: PasswordPolicyContext = {}
-): string[] => {
+): Promise<string[]> => {
   const errors: string[] = [];
   const normalized = password.normalize('NFKC');
   const minLength = context.requireMfaBoundMinimum ? 8 : 15;
@@ -39,6 +68,14 @@ export const validatePasswordPolicy = (
   const lower = normalized.toLowerCase();
   if (COMMON_PASSWORDS.has(lower)) {
     errors.push('Choose a less common password.');
+  }
+
+  try {
+    if (await hasCompromisedPasswordMatch(normalized)) {
+      errors.push('Choose a password that has not appeared in known data breaches.');
+    }
+  } catch {
+    errors.push('Password breach screening is temporarily unavailable. Please try again.');
   }
 
   const emailLocal = context.email?.split('@')[0]?.toLowerCase();

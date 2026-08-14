@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import api from '../lib/axios';
+import { startAuthentication } from '@simplewebauthn/browser';
 
 interface User {
   id: string;
@@ -17,9 +18,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string, mfaCode?: string, recoveryCode?: string) => Promise<void>;
+  passkeyLogin: (email: string) => Promise<void>;
   googleLogin: (token: string) => Promise<void>;
-  register: (name: string, email: string, password: string, confirmPassword: string) => Promise<void>;
+  register: (name: string, email: string, password: string, confirmPassword: string) => Promise<{ message?: string } | void>;
   logout: () => Promise<void>;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -67,9 +70,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [setActiveWorkspaceId]);
 
+  const passkeyLogin = useCallback(async (email: string) => {
+    const optionsRes = await api.post('/auth/passkeys/authenticate/options', { email }, { withCredentials: true });
+    const credential = await startAuthentication({ optionsJSON: optionsRes.data } as any);
+    const res = await api.post('/auth/passkeys/authenticate/verify', { credential }, { withCredentials: true });
+    const { user: userData, defaultWorkspaceId } = res.data;
+    setUser(userData);
+
+    if (defaultWorkspaceId || res.data.workspaceId) {
+      setActiveWorkspaceId(defaultWorkspaceId || res.data.workspaceId);
+    }
+  }, [setActiveWorkspaceId]);
+
   const register = useCallback(async (name: string, email: string, password: string, confirmPassword: string) => {
     const res = await api.post('/auth/register', { name, email, password, confirmPassword }, { withCredentials: true });
     const { user: userData, workspaceId } = res.data;
+    if (!userData) {
+      return { message: res.data.message };
+    }
     setUser(userData);
 
     if (workspaceId) {
@@ -99,6 +117,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveWorkspaceIdState(null);
   }, []);
 
+  const updateUser = useCallback((updatedUser: User) => {
+    setUser(updatedUser);
+  }, []);
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -107,9 +129,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!user,
       isLoading,
       login,
+      passkeyLogin,
       googleLogin,
       register,
       logout,
+      updateUser,
     }}>
       {children}
     </AuthContext.Provider>

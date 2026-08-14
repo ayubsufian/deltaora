@@ -2,9 +2,16 @@ import { Request, Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Workspace } from '../models/Workspace';
 import { PasswordResetToken } from '../models/PasswordResetToken';
+import { EmailVerificationToken } from '../models/EmailVerificationToken';
+import { PasskeyCredential } from '../models/PasskeyCredential';
 import { UserSession } from '../models/UserSession';
 import * as argon2 from 'argon2';
-import jwt from 'jsonwebtoken';
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from '@simplewebauthn/server';
 import {
   clearAuthCookies,
   generateTokens,
@@ -19,6 +26,7 @@ import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { sendEmail } from '../services/email.service';
 import { welcomeEmail, passwordResetEmail, verificationEmail } from '../utils/emailTemplates';
+import { logAuthEvent } from '../services/audit.service';
 import { OTP } from 'otplib';
 import QRCode from 'qrcode';
 import { OAuth2Client } from 'google-auth-library';
@@ -35,7 +43,11 @@ import {
 const otp = new OTP();
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 const GENERIC_LOGIN_ERROR = 'Invalid email or password';
+const GENERIC_REGISTER_MESSAGE = 'If this email can be used, a verification email has been sent.';
 const RESET_MESSAGE = 'If an account exists with that email, a password reset link has been sent.';
+
+const webAuthnOrigin = () => env.WEBAUTHN_ORIGIN || env.CLIENT_URL;
+const webAuthnRpId = () => env.WEBAUTHN_RP_ID || new URL(webAuthnOrigin()).hostname;
 
 const publicUser = (user: any) => ({
   id: user.id,
@@ -45,6 +57,27 @@ const publicUser = (user: any) => ({
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,
 });
+
+const createEmailVerificationToken = async (userId: string) => {
+  const token = randomToken(32);
+  await EmailVerificationToken.create({
+    userId,
+    tokenHash: sha256(token),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+  return token;
+};
+
+const sendVerificationLink = async (user: any) => {
+  const token = await createEmailVerificationToken(user.id);
+  const verificationUrl = `${env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
+
+  await sendEmail({
+    to: user.email,
+    subject: 'Deltaora - Verify Your Email',
+    htmlContent: verificationEmail(verificationUrl),
+  });
+};
 
 const recordFailedLogin = async (user: any) => {
   user.failedLoginCount = (user.failedLoginCount || 0) + 1;
@@ -88,14 +121,19 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { name, email, password } = req.body;
 
-    const passwordErrors = validatePasswordPolicy(password, { email, name });
+    const passwordErrors = await validatePasswordPolicy(password, { email, name });
     if (passwordErrors.length > 0) {
       return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordErrors });
     }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(409).json({ error: 'Email already exists' });
+      await logAuthEvent('auth.register_existing_email', {
+        actorId: existingUser.id,
+        metadata: { email },
+        req,
+      });
+      return res.status(202).json({ message: GENERIC_REGISTER_MESSAGE });
     }
 
     const user = new User({ name, email, passwordHash: password }); // pre-save hook hashes it with argon2
@@ -114,20 +152,9 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     const tokens = await generateTokens(user.id, user.role, req, undefined, { markReauthenticated: true });
     setAuthCookies(res, tokens);
 
-    // Generate verification token
-    const verificationToken = jwt.sign(
-      { userId: user.id },
-      env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-    const verificationUrl = `${env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${verificationToken}`;
-
     // 2026 Standard: Send welcome + verification email (fire-and-forget)
-    sendEmail({
-      to: email,
-      subject: 'Deltaora — Verify Your Email',
-      htmlContent: verificationEmail(verificationUrl),
-    }).catch(err => console.error('Failed to send verification email:', err));
+    sendVerificationLink(user).catch(err => console.error('Failed to send verification email:', err));
+    await logAuthEvent('auth.registered', { actorId: user.id, req });
 
     res.status(201).json({ user: publicUser(user), workspaceId: workspace.id });
   } catch (error) {
@@ -141,24 +168,33 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     const user = await User.findOne({ email });
     if (!user) {
+      await logAuthEvent('auth.login_failed', { metadata: { reason: 'unknown_email', email }, req });
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
     if (user.status !== 'active') {
+      await logAuthEvent('auth.login_blocked', { actorId: user.id, metadata: { reason: user.status }, req });
       return res.status(403).json({ error: 'Account is not active' });
     }
 
     if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      await logAuthEvent('auth.login_blocked', { actorId: user.id, metadata: { reason: 'locked' }, req });
       return res.status(429).json({ error: 'Account temporarily locked. Use password reset or try again later.' });
     }
 
     if (!user.passwordHash) {
+      await logAuthEvent('auth.login_failed', { actorId: user.id, metadata: { reason: 'password_unavailable' }, req });
       return res.status(401).json({ error: 'Please sign in with Google or reset your password' });
     }
 
     const isValid = await argon2.verify(user.passwordHash, password);
     if (!isValid) {
       await recordFailedLogin(user);
+      await logAuthEvent('auth.login_failed', {
+        actorId: user.id,
+        metadata: { reason: 'invalid_password', failedLoginCount: user.failedLoginCount },
+        req,
+      });
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
@@ -171,6 +207,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
       if (!mfaVerified) {
         await recordFailedLogin(user);
+        await logAuthEvent('auth.login_failed', {
+          actorId: user.id,
+          metadata: { reason: 'invalid_mfa', failedLoginCount: user.failedLoginCount },
+          req,
+        });
         return res.status(401).json({ error: 'INVALID_MFA', message: 'Invalid authentication code' });
       }
     }
@@ -181,6 +222,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       markMfaVerified: user.mfaEnabled,
     });
     setAuthCookies(res, tokens);
+    await logAuthEvent('auth.login_success', { actorId: user.id, metadata: { mfa: user.mfaEnabled }, req });
 
     // Return default workspace on login
     const workspace = await Workspace.findOne({ 'members.userId': user._id });
@@ -211,9 +253,24 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
       refreshTokenHash,
       revokedAt: { $exists: false },
       expiresAt: { $gt: new Date() },
+      absoluteExpiresAt: { $gt: new Date() },
     });
 
     if (isValidInRedis !== refreshTokenHash || !session) {
+      const suspiciousSession = await UserSession.findOne({
+        _id: decoded.sessionId,
+        userId: decoded.userId,
+        revokedAt: { $exists: false },
+      }).select('_id');
+
+      if (suspiciousSession) {
+        await revokeAllUserSessions(decoded.userId, 'refresh_token_reuse_detected');
+        await logAuthEvent('auth.refresh_reuse_detected', {
+          actorId: decoded.userId,
+          metadata: { sessionId: decoded.sessionId },
+          req,
+        });
+      }
       return res.status(401).json({ error: 'Unauthorized: Session expired or revoked' });
     }
 
@@ -238,6 +295,7 @@ export const logout = async (req: Request, res: Response, next: NextFunction) =>
       try {
         const decoded = verifyRefreshToken(refreshToken);
         await revokeRefreshToken(decoded.userId, refreshToken);
+        await logAuthEvent('auth.logout', { actorId: decoded.userId, req });
       } catch (e) {
         // Ignore errors during logout (e.g., token already expired)
       }
@@ -272,6 +330,7 @@ export const setupMfa = async (req: Request, res: Response, next: NextFunction) 
     // Save secret temporarily (not fully enabled until verified)
     user.mfaSecret = encryptSecret(secret);
     await user.save();
+    await logAuthEvent('auth.mfa_setup_started', { actorId: user.id, req });
 
     const qrCodeImage = await QRCode.toDataURL(otpauthUrl);
 
@@ -307,6 +366,7 @@ export const verifyMfa = async (req: Request, res: Response, next: NextFunction)
       await markSessionReauthenticated(user.id, req.user.sessionId, { mfaVerified: true });
     }
 
+    await logAuthEvent('auth.mfa_enabled', { actorId: user.id, req });
     res.json({ message: 'MFA enabled successfully', recoveryCodes: codes });
   } catch (error) {
     next(error);
@@ -349,6 +409,7 @@ export const stepUp = async (req: Request, res: Response, next: NextFunction) =>
     }
 
     await markSessionReauthenticated(user.id, sessionId, { mfaVerified });
+    await logAuthEvent('auth.step_up_success', { actorId: user.id, metadata: { mfaVerified }, req });
 
     res.json({ message: 'Re-authentication successful', mfaVerified });
   } catch (error) {
@@ -382,6 +443,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
       subject: 'Deltaora — Reset Your Password',
       htmlContent: passwordResetEmail(resetUrl),
     });
+    await logAuthEvent('auth.password_reset_requested', { actorId: user.id, req });
 
     res.json({ message: RESET_MESSAGE });
   } catch (error) {
@@ -408,7 +470,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ error: 'Invalid or expired token' });
     }
 
-    const passwordErrors = validatePasswordPolicy(newPassword, { email: user.email, name: user.name });
+    const passwordErrors = await validatePasswordPolicy(newPassword, { email: user.email, name: user.name });
     if (passwordErrors.length > 0) {
       return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordErrors });
     }
@@ -422,6 +484,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     await user.save();
     await revokeAllUserSessions(user.id, 'password_reset');
     clearAuthCookies(res);
+    await logAuthEvent('auth.password_reset_completed', { actorId: user.id, req });
 
     res.json({ message: 'Password has been successfully reset. You may now log in.' });
   } catch (error) {
@@ -441,18 +504,8 @@ export const sendVerificationEmail = async (req: Request, res: Response, next: N
       return res.status(400).json({ error: 'Email is already verified' });
     }
 
-    const verificationToken = jwt.sign(
-      { userId: user.id },
-      env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-    const verificationUrl = `${env.CLIENT_URL || 'http://localhost:5173'}/verify-email?token=${verificationToken}`;
-
-    await sendEmail({
-      to: user.email,
-      subject: 'Deltaora — Verify Your Email',
-      htmlContent: verificationEmail(verificationUrl),
-    });
+    await sendVerificationLink(user);
+    await logAuthEvent('auth.email_verification_sent', { actorId: user.id, req });
 
     res.json({ message: 'Verification email sent' });
   } catch (error) {
@@ -465,18 +518,24 @@ export const verifyEmail = async (req: Request, res: Response, next: NextFunctio
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token is required' });
 
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, env.JWT_SECRET);
-    } catch (err) {
+    const verificationRecord = await EmailVerificationToken.findOne({
+      tokenHash: sha256(token),
+      usedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!verificationRecord) {
       return res.status(400).json({ error: 'Invalid or expired token' });
     }
 
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(verificationRecord.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     user.isEmailVerified = true;
+    verificationRecord.usedAt = new Date();
+    await verificationRecord.save();
     await user.save();
+    await logAuthEvent('auth.email_verified', { actorId: user.id, req });
 
     res.json({ message: 'Email verified successfully', user: { isEmailVerified: true } });
   } catch (error) {
@@ -543,6 +602,7 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
         // Also verify their email if it wasn't already since Google confirmed it
         user.isEmailVerified = true;
         await user.save();
+        await logAuthEvent('auth.google_linked', { actorId: user.id, req });
       }
     }
 
@@ -550,10 +610,203 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
     await user.save();
     const tokens = await generateTokens(user.id, user.role, req, undefined, { markReauthenticated: true });
     setAuthCookies(res, tokens);
+    await logAuthEvent('auth.google_login_success', { actorId: user.id, req });
 
     res.json({ 
       user: publicUser(user),
       workspaceId
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const startPasskeyRegistration = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await User.findById(req.user?.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const existingCredentials = await PasskeyCredential.find({ userId: user._id });
+    const options = await generateRegistrationOptions({
+      rpName: 'Deltaora',
+      rpID: webAuthnRpId(),
+      userID: Buffer.from(user.id),
+      userName: user.email,
+      userDisplayName: user.name,
+      attestationType: 'none',
+      excludeCredentials: existingCredentials.map(credential => ({
+        id: credential.credentialId,
+        transports: credential.transports as any,
+      })),
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'required',
+      },
+      timeout: 60_000,
+    } as any);
+
+    await redis.set(`webauthn:registration:${user.id}`, options.challenge, 'EX', 5 * 60);
+    await logAuthEvent('auth.passkey_registration_started', { actorId: user.id, req });
+
+    res.json(options);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyPasskeyRegistration = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await User.findById(req.user?.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const expectedChallenge = await redis.get(`webauthn:registration:${user.id}`);
+    if (!expectedChallenge) {
+      return res.status(400).json({ error: 'Passkey registration challenge expired' });
+    }
+
+    const verification = await verifyRegistrationResponse({
+      response: req.body.credential,
+      expectedChallenge,
+      expectedOrigin: webAuthnOrigin(),
+      expectedRPID: webAuthnRpId(),
+      requireUserVerification: true,
+    } as any);
+
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ error: 'Passkey registration failed' });
+    }
+
+    const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo as any;
+    await PasskeyCredential.create({
+      userId: user._id,
+      credentialId: credential.id,
+      publicKey: Buffer.from(credential.publicKey),
+      counter: credential.counter,
+      deviceType: credentialDeviceType,
+      backedUp: !!credentialBackedUp,
+      transports: req.body.credential?.response?.transports || credential.transports || [],
+      name: req.body.name,
+    });
+
+    await redis.del(`webauthn:registration:${user.id}`);
+    await logAuthEvent('auth.passkey_registered', {
+      actorId: user.id,
+      metadata: { credentialId: credential.id },
+      req,
+    });
+
+    res.status(201).json({ message: 'Passkey registered successfully' });
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ error: 'This passkey is already registered' });
+    }
+    next(error);
+  }
+};
+
+export const startPasskeyAuthentication = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || user.status !== 'active') {
+      await logAuthEvent('auth.passkey_login_failed', { metadata: { reason: 'unknown_or_inactive', email }, req });
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    const credentials = await PasskeyCredential.find({ userId: user._id });
+    if (credentials.length === 0) {
+      await logAuthEvent('auth.passkey_login_failed', { actorId: user.id, metadata: { reason: 'no_passkeys' }, req });
+      return res.status(401).json({ error: 'No passkeys are registered for this account' });
+    }
+
+    const options = await generateAuthenticationOptions({
+      rpID: webAuthnRpId(),
+      allowCredentials: credentials.map(credential => ({
+        id: credential.credentialId,
+        transports: credential.transports as any,
+      })),
+      userVerification: 'required',
+      timeout: 60_000,
+    } as any);
+
+    await Promise.all(credentials.map(credential =>
+      redis.set(
+        `webauthn:authentication:${credential.credentialId}`,
+        JSON.stringify({ challenge: options.challenge, userId: user.id }),
+        'EX',
+        5 * 60
+      )
+    ));
+
+    res.json(options);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyPasskeyAuthentication = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const credentialId = req.body.credential?.id;
+    const credential = await PasskeyCredential.findOne({ credentialId });
+    if (!credential) {
+      await logAuthEvent('auth.passkey_login_failed', { metadata: { reason: 'unknown_credential' }, req });
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    const challengeRecord = await redis.get(`webauthn:authentication:${credential.credentialId}`);
+    if (!challengeRecord) {
+      return res.status(400).json({ error: 'Passkey authentication challenge expired' });
+    }
+
+    const { challenge, userId } = JSON.parse(challengeRecord);
+    const user = await User.findById(userId);
+    if (!user || user.status !== 'active') {
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    const verification = await verifyAuthenticationResponse({
+      response: req.body.credential,
+      expectedChallenge: challenge,
+      expectedOrigin: webAuthnOrigin(),
+      expectedRPID: webAuthnRpId(),
+      credential: {
+        id: credential.credentialId,
+        publicKey: new Uint8Array(credential.publicKey),
+        counter: credential.counter,
+        transports: credential.transports as any,
+      },
+      requireUserVerification: true,
+    } as any);
+
+    if (!verification.verified || !verification.authenticationInfo) {
+      await logAuthEvent('auth.passkey_login_failed', {
+        actorId: user.id,
+        metadata: { reason: 'verification_failed' },
+        req,
+      });
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
+
+    credential.counter = (verification.authenticationInfo as any).newCounter;
+    credential.lastUsedAt = new Date();
+    await credential.save();
+    await redis.del(`webauthn:authentication:${credential.credentialId}`);
+
+    const tokens = await generateTokens(user.id, user.role, req, undefined, {
+      markReauthenticated: true,
+      markMfaVerified: true,
+    });
+    setAuthCookies(res, tokens);
+    await logAuthEvent('auth.passkey_login_success', {
+      actorId: user.id,
+      metadata: { credentialId: credential.credentialId },
+      req,
+    });
+
+    const workspace = await Workspace.findOne({ 'members.userId': user._id });
+    res.json({
+      user: publicUser(user),
+      defaultWorkspaceId: workspace?.id,
     });
   } catch (error) {
     next(error);

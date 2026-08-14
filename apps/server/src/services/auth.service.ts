@@ -11,7 +11,8 @@ export const ACCESS_TOKEN_COOKIE = production ? '__Host-deltaora-access' : 'delt
 export const REFRESH_TOKEN_COOKIE = production ? '__Host-deltaora-refresh' : 'deltaora.refreshToken';
 export const CSRF_COOKIE = production ? '__Host-deltaora-csrf' : 'deltaora.csrfToken';
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
-const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const REFRESH_TOKEN_IDLE_TTL_SECONDS = 12 * 60 * 60;
+const REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const STEP_UP_TTL_MS = 10 * 60 * 1000;
 
 export interface AccessTokenPayload {
@@ -37,7 +38,7 @@ export const setCsrfCookie = (res: Response) => {
   res.cookie(CSRF_COOKIE, csrfToken, {
     ...baseCookieOptions(),
     httpOnly: false,
-    maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
+    maxAge: REFRESH_TOKEN_IDLE_TTL_SECONDS * 1000,
   });
   return csrfToken;
 };
@@ -55,7 +56,7 @@ export const setAuthCookies = (
   res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
     ...baseCookieOptions(),
     httpOnly: true,
-    maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
+    maxAge: REFRESH_TOKEN_IDLE_TTL_SECONDS * 1000,
   });
 
   setCsrfCookie(res);
@@ -75,7 +76,8 @@ export const generateTokens = async (
   existingSessionId?: string,
   options: { markReauthenticated?: boolean; markMfaVerified?: boolean } = {}
 ) => {
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000);
+  const now = new Date();
+  let absoluteExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS * 1000);
   let sessionId = existingSessionId;
 
   if (!sessionId) {
@@ -84,20 +86,37 @@ export const generateTokens = async (
       refreshTokenHash: 'pending',
       userAgent: req?.headers['user-agent'],
       ipAddress: getRequestIp(req),
-      expiresAt,
-      lastSeenAt: new Date(),
-      reauthenticatedAt: options.markReauthenticated ? new Date() : undefined,
-      mfaVerifiedAt: options.markMfaVerified ? new Date() : undefined,
+      expiresAt: new Date(now.getTime() + REFRESH_TOKEN_IDLE_TTL_SECONDS * 1000),
+      absoluteExpiresAt,
+      lastSeenAt: now,
+      reauthenticatedAt: options.markReauthenticated ? now : undefined,
+      mfaVerifiedAt: options.markMfaVerified ? now : undefined,
     });
     sessionId = session.id;
+  } else {
+    const existingSession = await UserSession.findOne({
+      _id: sessionId,
+      userId,
+      revokedAt: { $exists: false },
+      absoluteExpiresAt: { $gt: now },
+    }).select('absoluteExpiresAt');
+
+    if (!existingSession) {
+      throw new Error('Session expired or revoked');
+    }
+
+    absoluteExpiresAt = existingSession.absoluteExpiresAt;
   }
+
+  const idleExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_IDLE_TTL_SECONDS * 1000);
+  const expiresAt = idleExpiresAt < absoluteExpiresAt ? idleExpiresAt : absoluteExpiresAt;
 
   const accessToken = jwt.sign({ userId, role, sessionId }, env.JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_TTL_SECONDS,
   });
 
   const refreshToken = jwt.sign({ userId, sessionId }, env.JWT_REFRESH_SECRET, {
-    expiresIn: REFRESH_TOKEN_TTL_SECONDS,
+    expiresIn: Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 1000)),
   });
 
   const refreshTokenHash = sha256(refreshToken);
@@ -108,16 +127,22 @@ export const generateTokens = async (
       $set: {
         refreshTokenHash,
         expiresAt,
-        lastSeenAt: new Date(),
+        absoluteExpiresAt,
+        lastSeenAt: now,
         userAgent: req?.headers['user-agent'],
         ipAddress: getRequestIp(req),
-        ...(options.markReauthenticated ? { reauthenticatedAt: new Date() } : {}),
-        ...(options.markMfaVerified ? { mfaVerifiedAt: new Date() } : {}),
+        ...(options.markReauthenticated ? { reauthenticatedAt: now } : {}),
+        ...(options.markMfaVerified ? { mfaVerifiedAt: now } : {}),
       },
     }
   );
 
-  await redis.set(`refresh_token:${sessionId}`, refreshTokenHash, 'EX', REFRESH_TOKEN_TTL_SECONDS);
+  await redis.set(
+    `refresh_token:${sessionId}`,
+    refreshTokenHash,
+    'EX',
+    Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 1000))
+  );
 
   return { accessToken, refreshToken };
 };
