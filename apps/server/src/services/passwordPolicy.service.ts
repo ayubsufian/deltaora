@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import { readFile } from 'fs/promises';
+import path from 'path';
+import { env } from '../config/env';
 
 const COMMON_PASSWORDS = new Set([
   'password',
@@ -24,6 +27,9 @@ const COMMON_PASSWORDS = new Set([
 ]);
 
 const PWNED_PASSWORDS_RANGE_URL = 'https://api.pwnedpasswords.com/range';
+const HASH_PREFIX_LENGTH = 5;
+const HASH_SUFFIX_LENGTH = 35;
+const SHA1_HEX_PATTERN = /^[0-9A-F]+$/;
 
 interface PasswordPolicyContext {
   email?: string;
@@ -31,22 +37,123 @@ interface PasswordPolicyContext {
   requireMfaBoundMinimum?: boolean;
 }
 
-const hasCompromisedPasswordMatch = async (password: string) => {
-  const hash = crypto.createHash('sha1').update(password, 'utf8').digest('hex').toUpperCase();
-  const prefix = hash.slice(0, 5);
-  const suffix = hash.slice(5);
+interface CachedRange {
+  suffixes: Set<string>;
+  expiresAt: number;
+}
 
-  const response = await fetch(`${PWNED_PASSWORDS_RANGE_URL}/${prefix}`, {
-    headers: { 'Add-Padding': 'true' },
-    signal: AbortSignal.timeout(3000),
+const rangeCache = new Map<string, CachedRange>();
+
+const getPasswordHashParts = (password: string) => {
+  const hash = crypto.createHash('sha1').update(password, 'utf8').digest('hex').toUpperCase();
+  return {
+    prefix: hash.slice(0, HASH_PREFIX_LENGTH),
+    suffix: hash.slice(HASH_PREFIX_LENGTH),
+  };
+};
+
+const parseRangeResponse = (body: string) => {
+  const suffixes = new Set<string>();
+
+  for (const line of body.split(/\r?\n/)) {
+    const [rawSuffix, rawCount] = line.trim().split(':');
+    const suffix = rawSuffix?.trim().toUpperCase();
+    const count = Number.parseInt(rawCount || '', 10);
+
+    if (
+      suffix?.length === HASH_SUFFIX_LENGTH &&
+      SHA1_HEX_PATTERN.test(suffix) &&
+      Number.isFinite(count) &&
+      count > 0
+    ) {
+      suffixes.add(suffix);
+    }
+  }
+
+  return suffixes;
+};
+
+const getCachedRange = (prefix: string) => {
+  const cached = rangeCache.get(prefix);
+  if (!cached) return null;
+
+  if (cached.expiresAt <= Date.now()) {
+    rangeCache.delete(prefix);
+    return null;
+  }
+
+  rangeCache.delete(prefix);
+  rangeCache.set(prefix, cached);
+  return cached.suffixes;
+};
+
+const cacheRange = (prefix: string, suffixes: Set<string>) => {
+  if (env.PASSWORD_BREACH_SCREENING_CACHE_MAX_PREFIXES <= 0) return;
+
+  rangeCache.set(prefix, {
+    suffixes,
+    expiresAt: Date.now() + env.PASSWORD_BREACH_SCREENING_CACHE_TTL_SECONDS * 1000,
+  });
+
+  while (rangeCache.size > env.PASSWORD_BREACH_SCREENING_CACHE_MAX_PREFIXES) {
+    const oldestPrefix = rangeCache.keys().next().value;
+    if (!oldestPrefix) break;
+    rangeCache.delete(oldestPrefix);
+  }
+};
+
+const readLocalRange = async (prefix: string) => {
+  if (!env.PASSWORD_BREACH_SCREENING_LOCAL_DIR) {
+    throw new Error('PASSWORD_BREACH_SCREENING_LOCAL_DIR is required when local breach screening is enabled');
+  }
+
+  const baseDir = path.resolve(env.PASSWORD_BREACH_SCREENING_LOCAL_DIR);
+  const prefixFile = path.resolve(baseDir, `${prefix}.txt`);
+
+  if (!prefixFile.startsWith(`${baseDir}${path.sep}`)) {
+    throw new Error('Invalid local breach screening prefix path');
+  }
+
+  return parseRangeResponse(await readFile(prefixFile, 'utf8'));
+};
+
+const fetchRemoteRange = async (prefix: string) => {
+  const response = await fetch(`${env.PWNED_PASSWORDS_RANGE_URL || PWNED_PASSWORDS_RANGE_URL}/${prefix}`, {
+    headers: {
+      Accept: 'text/plain',
+      'Add-Padding': 'true',
+      'User-Agent': env.PWNED_PASSWORDS_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(env.PASSWORD_BREACH_SCREENING_TIMEOUT_MS),
   });
 
   if (!response.ok) {
     throw new Error(`Compromised password check failed with status ${response.status}`);
   }
 
-  const body = await response.text();
-  return body.split('\n').some(line => line.split(':')[0].trim().toUpperCase() === suffix);
+  return parseRangeResponse(await response.text());
+};
+
+const getRangeSuffixes = async (prefix: string) => {
+  const cached = getCachedRange(prefix);
+  if (cached) return cached;
+
+  const suffixes = env.PASSWORD_BREACH_SCREENING_MODE === 'local'
+    ? await readLocalRange(prefix)
+    : await fetchRemoteRange(prefix);
+
+  cacheRange(prefix, suffixes);
+  return suffixes;
+};
+
+const hasCompromisedPasswordMatch = async (password: string) => {
+  if (env.PASSWORD_BREACH_SCREENING_MODE === 'disabled') {
+    return false;
+  }
+
+  const { prefix, suffix } = getPasswordHashParts(password);
+  const suffixes = await getRangeSuffixes(prefix);
+  return suffixes.has(suffix);
 };
 
 export const validatePasswordPolicy = async (
@@ -54,7 +161,7 @@ export const validatePasswordPolicy = async (
   context: PasswordPolicyContext = {}
 ): Promise<string[]> => {
   const errors: string[] = [];
-  const normalized = password.normalize('NFKC');
+  const normalized = password.normalize('NFC');
   const minLength = context.requireMfaBoundMinimum ? 8 : 15;
 
   if (normalized.length < minLength) {
@@ -75,7 +182,9 @@ export const validatePasswordPolicy = async (
       errors.push('Choose a password that has not appeared in known data breaches.');
     }
   } catch {
-    errors.push('Password breach screening is temporarily unavailable. Please try again.');
+    if (env.PASSWORD_BREACH_SCREENING_FAILURE_POLICY === 'block') {
+      errors.push('Password breach screening is temporarily unavailable. Please try again.');
+    }
   }
 
   const emailLocal = context.email?.split('@')[0]?.toLowerCase();

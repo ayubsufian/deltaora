@@ -36,6 +36,12 @@ pnpm install
 pnpm run dev
 ```
 
+## Password Breach Screening
+
+Deltaora checks new, changed, and reset passwords against a breached-password blocklist. By default the server uses the Have I Been Pwned Pwned Passwords range API over HTTPS with k-anonymity response padding.
+
+Production deployments must either allow outbound HTTPS from the API service to `https://api.pwnedpasswords.com/range` or set `PASSWORD_BREACH_SCREENING_MODE=local` and provide `PASSWORD_BREACH_SCREENING_LOCAL_DIR`. The local directory should contain prefix-sharded HIBP-style files named by the first five SHA-1 hash characters, for example `ABCDE.txt`, with `suffix:count` rows. Keep `PASSWORD_BREACH_SCREENING_FAILURE_POLICY=block` for production so password establishment fails closed when screening is unavailable.
+
 ## Workspaces
 
 - `apps/client` - React frontend
