@@ -4,6 +4,15 @@ export const PageStatus = {
 } as const;
 export type PageStatus = typeof PageStatus[keyof typeof PageStatus];
 
+export const CrawlStatus = {
+  SUCCESS: 'success',
+  FAILED: 'failed',
+  BLOCKED: 'blocked',
+  UNSUPPORTED: 'unsupported',
+  AUTH_REQUIRED: 'auth_required',
+} as const;
+export type CrawlStatus = typeof CrawlStatus[keyof typeof CrawlStatus];
+
 export const Importance = {
   LOW: 'low',
   MEDIUM: 'medium',
@@ -56,7 +65,46 @@ export interface IMonitoredPage {
   checkInterval: number; // in minutes
   status: PageStatus;
   lastChecked?: Date;
+  lastCrawlStatus?: CrawlStatus;
+  lastCrawlError?: string;
+  lastCrawlCode?: string;
+  lastHttpStatus?: number;
+  lastContentType?: string;
+  lastResolvedUrl?: string;
+  crawlerConfig?: ICrawlerConfig;
   createdAt: Date;
+}
+
+export interface ICrawlerCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: 'Strict' | 'Lax' | 'None';
+}
+
+export interface ICrawlerAuthConfig {
+  headers?: Record<string, string>;
+  cookies?: ICrawlerCookie[];
+  storageState?: Record<string, unknown>;
+}
+
+export interface ICrawlerConfig {
+  respectRobots?: boolean;
+  extraction?: {
+    includeSelectors?: string[];
+    excludeSelectors?: string[];
+  };
+  behavior?: {
+    waitForSelector?: string;
+    clickSelectors?: string[];
+    scrollToBottom?: boolean;
+    acceptCookieBanners?: boolean;
+    waitAfterLoadMs?: number;
+  };
 }
 
 export interface ISnapshot {
@@ -104,6 +152,7 @@ export interface IJob {
   _id: string;
   pageId: string;
   status: JobStatus;
+  error?: string;
   startedAt?: Date;
   completedAt?: Date;
 }

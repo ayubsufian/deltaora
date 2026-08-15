@@ -36,7 +36,16 @@ export const startScheduler = () => {
               status: JobStatus.PENDING,
             });
 
-            await crawlQueue.add('crawl', { pageId: page.id, jobId: jobRecord.id });
+            await crawlQueue.add(
+              'crawl',
+              { pageId: page.id, jobId: jobRecord.id },
+              {
+                jobId: `crawl:${page.id}`,
+                attempts: 1,
+                removeOnComplete: true,
+                removeOnFail: { age: 7 * 24 * 60 * 60 },
+              }
+            );
           }
         }
       }

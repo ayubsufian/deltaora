@@ -7,6 +7,13 @@ import { ArrowLeft, ExternalLink, RefreshCw, Settings } from 'lucide-react';
 import { usePageDetail, usePageSummaries, usePageDiffs } from '../hooks/useApi';
 import { formatDateRelative } from '@deltaora/shared-utils';
 
+const crawlBadgeVariant = (status?: string) => {
+  if (status === 'success') return 'success';
+  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported') return 'warning';
+  if (status === 'failed') return 'destructive';
+  return 'outline';
+};
+
 export function PageDetail() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading } = usePageDetail(id!);
@@ -42,6 +49,11 @@ export function PageDetail() {
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{page.title}</h2>
             <Badge variant={page.status === 'active' ? 'success' : 'warning'} className="uppercase">{page.status}</Badge>
+            {page.lastCrawlStatus && (
+              <Badge variant={crawlBadgeVariant(page.lastCrawlStatus)} className="uppercase">
+                {page.lastCrawlStatus.replace(/_/g, ' ')}
+              </Badge>
+            )}
           </div>
           <a href={page.url} target="_blank" rel="noopener noreferrer" className="flex items-center text-sm text-blue-600 hover:underline mt-1 w-fit">
             {page.url} <ExternalLink size={12} className="ml-1" />
@@ -112,6 +124,17 @@ export function PageDetail() {
                   {page.lastChecked ? formatDateRelative(new Date(page.lastChecked)) : 'Never'}
                 </span>
               </div>
+              {page.lastCrawlStatus && (
+                <div className="border-b border-gray-100 dark:border-gray-800 pb-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Last Crawl</span>
+                    <span className="font-medium text-gray-900 dark:text-white capitalize">{page.lastCrawlStatus.replace(/_/g, ' ')}</span>
+                  </div>
+                  {page.lastCrawlError && (
+                    <p className="mt-2 text-xs text-gray-500 break-words">{page.lastCrawlError}</p>
+                  )}
+                </div>
+              )}
               <div className="flex justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
                 <span className="text-gray-500">Category</span>
                 <span className="font-medium text-gray-900 dark:text-white capitalize">{page.category}</span>

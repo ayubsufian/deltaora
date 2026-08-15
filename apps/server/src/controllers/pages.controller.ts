@@ -6,6 +6,20 @@ import { Workspace } from '../models/Workspace';
 import { PageStatus } from '@deltaora/shared-types';
 import { ForbiddenError } from '@casl/ability';
 import { logAuditEvent } from '../services/audit.service';
+import { encryptSecret } from '../services/security.service';
+import { assertSafeScrapeUrl } from '../services/urlSafety.service';
+
+const splitCrawlerConfig = (crawlerConfig: any) => {
+  if (!crawlerConfig) {
+    return { publicCrawlerConfig: undefined, crawlerAuthEncrypted: undefined };
+  }
+
+  const { auth, ...publicCrawlerConfig } = crawlerConfig;
+  return {
+    publicCrawlerConfig,
+    crawlerAuthEncrypted: auth ? encryptSecret(JSON.stringify(auth)) : undefined,
+  };
+};
 
 export const getPages = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -46,7 +60,7 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
   try {
     const userId = req.user!.userId;
     const workspaceId = req.workspaceId;
-    const { url, title, category, importance, checkInterval } = req.body;
+    const { url, title, category, importance, checkInterval, crawlerConfig } = req.body;
 
     if (!workspaceId) {
       return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
@@ -72,6 +86,10 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       return res.status(409).json({ error: 'URL is already being monitored in this workspace' });
     }
 
+    await assertSafeScrapeUrl(url);
+
+    const { publicCrawlerConfig, crawlerAuthEncrypted } = splitCrawlerConfig(crawlerConfig);
+
     const page = new MonitoredPage({
       userId, // Audit trail: who created this page
       workspaceId,
@@ -80,6 +98,8 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       category,
       importance,
       checkInterval,
+      crawlerConfig: publicCrawlerConfig,
+      crawlerAuthEncrypted,
       status: PageStatus.ACTIVE,
     });
 
@@ -133,10 +153,22 @@ export const updatePage = async (req: Request, res: Response, next: NextFunction
   try {
     const { id } = req.params;
     const workspaceId = req.workspaceId;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     // CASL check
     ForbiddenError.from(req.ability!).throwUnlessCan('update', 'MonitoredPage');
+
+    if (updateData.url) {
+      await assertSafeScrapeUrl(updateData.url);
+    }
+
+    if (updateData.crawlerConfig) {
+      const { publicCrawlerConfig, crawlerAuthEncrypted } = splitCrawlerConfig(updateData.crawlerConfig);
+      updateData.crawlerConfig = publicCrawlerConfig;
+      if (crawlerAuthEncrypted) {
+        updateData.crawlerAuthEncrypted = crawlerAuthEncrypted;
+      }
+    }
 
     const page = await MonitoredPage.findOneAndUpdate(
       { _id: id, workspaceId },

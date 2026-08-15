@@ -49,6 +49,12 @@ interface MonitoredPage {
   status: string;
   checkInterval: number;
   lastChecked: string | null;
+  lastCrawlStatus?: string;
+  lastCrawlError?: string;
+  lastCrawlCode?: string;
+  lastHttpStatus?: number;
+  lastContentType?: string;
+  lastResolvedUrl?: string;
   createdAt: string;
   updatedAt: string;
 }

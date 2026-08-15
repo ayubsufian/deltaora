@@ -4,10 +4,9 @@ import { MonitoredPage } from '../models/MonitoredPage';
 import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
 import { Job as JobModel } from '../models/Job';
-import { fetchPageHTML } from '../services/scraper.service';
-import { extractCleanText } from '../services/extractor.service';
+import { CrawlError, scrapeTarget } from '../services/scraper.service';
 import { generateDiff } from '../services/diff.service';
-import { JobStatus } from '@deltaora/shared-types';
+import { CrawlStatus, JobStatus } from '@deltaora/shared-types';
 
 export const summaryQueue = new Queue('summaryQueue', {
   connection: { url: env.REDIS_URL }
@@ -19,12 +18,12 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
   await JobModel.findByIdAndUpdate(dbJobId, { status: JobStatus.RUNNING, startedAt: new Date() });
 
   try {
-    const page = await MonitoredPage.findById(pageId);
+    const page = await MonitoredPage.findById(pageId).select('+crawlerAuthEncrypted');
     if (!page) throw new Error('Page not found');
     const workspaceId = page.workspaceId;
 
-    const html = await fetchPageHTML(page.url);
-    const { content, contentHash } = extractCleanText(html, page.url);
+    const scrape = await scrapeTarget(page.url, page.crawlerConfig, page.crawlerAuthEncrypted);
+    const { content, contentHash } = scrape;
 
     const latestSnapshot = await Snapshot.findOne({ pageId, workspaceId }).sort({ createdAt: -1 });
 
@@ -54,14 +53,45 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       }
     }
 
-    await MonitoredPage.findByIdAndUpdate(pageId, { lastChecked: new Date() });
+    await MonitoredPage.findByIdAndUpdate(pageId, {
+      lastChecked: new Date(),
+      lastCrawlStatus: CrawlStatus.SUCCESS,
+      lastCrawlError: undefined,
+      lastCrawlCode: undefined,
+      lastHttpStatus: scrape.httpStatus,
+      lastContentType: scrape.contentType,
+      lastResolvedUrl: scrape.finalUrl,
+    });
     await JobModel.findByIdAndUpdate(dbJobId, { status: JobStatus.COMPLETED, completedAt: new Date() });
 
   } catch (error) {
-    await JobModel.findByIdAndUpdate(dbJobId, { status: JobStatus.FAILED, completedAt: new Date() });
+    const err = error as Error & { code?: string; statusCode?: number; crawlStatus?: CrawlStatus };
+    const crawlStatus =
+      err instanceof CrawlError ? err.crawlStatus :
+      err.statusCode === 403 ? CrawlStatus.BLOCKED :
+      err.statusCode === 415 ? CrawlStatus.UNSUPPORTED :
+      err.statusCode === 401 ? CrawlStatus.AUTH_REQUIRED :
+      CrawlStatus.FAILED;
+
+    await MonitoredPage.findByIdAndUpdate(pageId, {
+      lastChecked: new Date(),
+      lastCrawlStatus: crawlStatus,
+      lastCrawlError: err.message,
+      lastCrawlCode: err.code || 'crawl_failed',
+      lastHttpStatus: err.statusCode,
+    });
+    await JobModel.findByIdAndUpdate(dbJobId, {
+      status: JobStatus.FAILED,
+      completedAt: new Date(),
+      error: err.message,
+    });
     throw error;
   }
-}, { connection: { url: env.REDIS_URL }, concurrency: 5 });
+}, {
+  connection: { url: env.REDIS_URL },
+  concurrency: 5,
+  limiter: { max: 30, duration: 60_000 },
+});
 
 crawlWorker.on('failed', (job, err) => {
   console.error(`Crawl job ${job?.id} failed with error:`, err);

@@ -1,8 +1,9 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { IMonitoredPage, PageStatus, Category, Importance } from '@deltaora/shared-types';
+import { IMonitoredPage, PageStatus, CrawlStatus, Category, Importance } from '@deltaora/shared-types';
 
 export interface IMonitoredPageDocument extends Omit<IMonitoredPage, '_id'>, Document {
   workspaceId: mongoose.Types.ObjectId;
+  crawlerAuthEncrypted?: string;
 }
 
 const MonitoredPageSchema = new Schema<IMonitoredPageDocument>(
@@ -16,6 +17,14 @@ const MonitoredPageSchema = new Schema<IMonitoredPageDocument>(
     checkInterval: { type: Number, required: true, default: 60 },
     status: { type: String, enum: Object.values(PageStatus), default: PageStatus.ACTIVE },
     lastChecked: { type: Date },
+    lastCrawlStatus: { type: String, enum: Object.values(CrawlStatus) },
+    lastCrawlError: { type: String },
+    lastCrawlCode: { type: String },
+    lastHttpStatus: { type: Number },
+    lastContentType: { type: String },
+    lastResolvedUrl: { type: String },
+    crawlerConfig: { type: Schema.Types.Mixed },
+    crawlerAuthEncrypted: { type: String, select: false },
   },
   { timestamps: true }
 );

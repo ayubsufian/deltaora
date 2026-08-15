@@ -3,6 +3,17 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: '../../.env' }); // Load from root
 
+const booleanFromEnv = (defaultValue: boolean) =>
+  z.preprocess(value => {
+    if (value === undefined || value === '') return defaultValue;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (['true', '1', 'yes', 'on'].includes(value.toLowerCase())) return true;
+      if (['false', '0', 'no', 'off'].includes(value.toLowerCase())) return false;
+    }
+    return value;
+  }, z.boolean());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('5000'),
@@ -36,6 +47,15 @@ const envSchema = z.object({
   
   // Scraping Proxy
   PROXY_URL: z.string().optional(),
+  CRAWLER_USER_AGENT: z.string().min(8).default('DeltaoraBot/1.0 (+https://deltaora.local/crawler)'),
+  CRAWLER_CONTACT_URL: z.string().url().optional(),
+  CRAWLER_RESPECT_ROBOTS: booleanFromEnv(true),
+  CRAWLER_ALLOW_PRIVATE_NETWORKS: booleanFromEnv(false),
+  CRAWLER_MAX_BYTES: z.coerce.number().int().positive().max(50_000_000).default(10_000_000),
+  CRAWLER_MAX_REDIRECTS: z.coerce.number().int().min(0).max(10).default(5),
+  CRAWLER_MIN_HOST_DELAY_MS: z.coerce.number().int().min(0).max(300_000).default(5000),
+  CRAWLER_ROBOTS_CACHE_SECONDS: z.coerce.number().int().positive().max(86_400).default(3600),
+  CRAWLER_ROBOTS_MAX_BYTES: z.coerce.number().int().positive().max(1_000_000).default(512_000),
   
   // Brevo Email
   BREVO_API_KEY: z.string().optional(),

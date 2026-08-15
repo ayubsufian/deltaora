@@ -7,6 +7,7 @@ const JobSchema = new Schema<IJobDocument>(
   {
     pageId: { type: String, required: true, index: true },
     status: { type: String, enum: Object.values(JobStatus), default: JobStatus.PENDING },
+    error: { type: String },
     startedAt: { type: Date },
     completedAt: { type: Date },
   },

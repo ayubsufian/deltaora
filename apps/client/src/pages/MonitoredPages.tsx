@@ -24,6 +24,13 @@ const updatePageSchema = createPageSchema.extend({
 type CreatePageForm = z.infer<typeof createPageSchema>;
 type UpdatePageForm = z.infer<typeof updatePageSchema>;
 
+const crawlBadgeVariant = (status?: string) => {
+  if (status === 'success') return 'success';
+  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported') return 'warning';
+  if (status === 'failed') return 'destructive';
+  return 'outline';
+};
+
 export function MonitoredPages() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -237,7 +244,18 @@ export function MonitoredPages() {
                       </Badge>
                     </td>
                     <td className="px-6 py-4">
-                      <Badge variant={page.status === 'active' ? 'success' : 'warning'} className="uppercase">{page.status}</Badge>
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge variant={page.status === 'active' ? 'success' : 'warning'} className="uppercase">{page.status}</Badge>
+                        {page.lastCrawlStatus && (
+                          <Badge
+                            variant={crawlBadgeVariant(page.lastCrawlStatus)}
+                            className="uppercase"
+                            title={page.lastCrawlError || undefined}
+                          >
+                            {page.lastCrawlStatus.replace(/_/g, ' ')}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {page.lastChecked ? formatDateRelative(new Date(page.lastChecked)) : 'Never'}

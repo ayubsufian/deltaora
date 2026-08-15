@@ -2,6 +2,8 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import crypto from 'crypto';
+import mammoth from 'mammoth';
+import { parse as parseCsv } from 'csv-parse/sync';
 
 // ── 2026 Standard: Semantic Markdown Extraction Pipeline ──
 //
@@ -58,7 +60,38 @@ function createTurndownService(): TurndownService {
  * This runs BEFORE Readability to give it the cleanest possible input.
  * Targets common anti-patterns that Readability alone may not catch.
  */
-function preProcessDOM(document: Document): void {
+export interface HtmlExtractionOptions {
+  includeSelectors?: string[];
+  excludeSelectors?: string[];
+}
+
+export interface ExtractedContent {
+  content: string;
+  contentHash: string;
+  extractionMethod: string;
+}
+
+export class UnsupportedContentError extends Error {
+  code = 'unsupported_content_type';
+  statusCode = 415;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedContentError';
+  }
+}
+
+function applySelectors(document: Document, selectors: string[], action: (el: Element) => void): void {
+  selectors.forEach(selector => {
+    try {
+      document.querySelectorAll(selector).forEach(action);
+    } catch {
+      // Invalid user selectors are ignored here because validation only checks size.
+    }
+  });
+}
+
+function preProcessDOM(document: Document, options: HtmlExtractionOptions = {}): void {
   const selectorsToRemove = [
     // Navigation & structural chrome
     'nav', 'header', 'footer', 'aside',
@@ -88,13 +121,8 @@ function preProcessDOM(document: Document): void {
     '.comments', '#comments', '.comment-section',
   ];
 
-  selectorsToRemove.forEach(selector => {
-    try {
-      document.querySelectorAll(selector).forEach(el => el.remove());
-    } catch {
-      // Skip invalid selectors silently
-    }
-  });
+  applySelectors(document, selectorsToRemove, el => el.remove());
+  applySelectors(document, options.excludeSelectors || [], el => el.remove());
 
   // Remove all hidden elements
   document.querySelectorAll('[style*="display:none"], [style*="display: none"], [hidden], .hidden, .visually-hidden, .sr-only').forEach(el => el.remove());
@@ -117,7 +145,16 @@ function preProcessDOM(document: Document): void {
  * Returns the extracted HTML content, or falls back to <body> if Readability
  * fails (e.g., on non-article pages like dashboards).
  */
-function extractReadableContent(document: Document, url: string): string {
+function extractReadableContent(document: Document, url: string, options: HtmlExtractionOptions = {}): string {
+  if (options.includeSelectors?.length) {
+    const selectedHtml: string[] = [];
+    applySelectors(document, options.includeSelectors, el => selectedHtml.push(el.outerHTML));
+
+    if (selectedHtml.length) {
+      return selectedHtml.join('\n');
+    }
+  }
+
   const reader = new Readability(document, {
     charThreshold: 100,     // Minimum chars to consider a node as content
     nbTopCandidates: 5,     // Number of top candidates to evaluate
@@ -150,6 +187,10 @@ function cleanMarkdown(markdown: string): string {
     .trim();
 }
 
+function hashContent(content: string): string {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
 /**
  * Extract clean, structured Markdown content from raw HTML.
  * 
@@ -165,16 +206,16 @@ function cleanMarkdown(markdown: string): string {
  * 
  * @returns Structured Markdown content and its hash for comparison
  */
-export const extractCleanText = (html: string, url: string = ''): { content: string; contentHash: string } => {
+export const extractCleanText = (html: string, url: string = '', options: HtmlExtractionOptions = {}): ExtractedContent => {
   // Parse with JSDOM
   const dom = new JSDOM(html, { url: url || undefined });
   const document = dom.window.document;
 
   // Stage 1: Pre-process — remove noise
-  preProcessDOM(document);
+  preProcessDOM(document, options);
 
   // Stage 2: Extract primary content with Readability
-  const readableHTML = extractReadableContent(document, url);
+  const readableHTML = extractReadableContent(document, url, options);
 
   // Stage 3: Convert HTML to Markdown
   const turndown = createTurndownService();
@@ -184,10 +225,92 @@ export const extractCleanText = (html: string, url: string = ''): { content: str
   markdown = cleanMarkdown(markdown);
 
   // Stage 5: Hash for quick comparison
-  const contentHash = crypto.createHash('sha256').update(markdown).digest('hex');
+  const contentHash = hashContent(markdown);
 
   // Cleanup JSDOM
   dom.window.close();
 
-  return { content: markdown, contentHash };
+  return { content: markdown, contentHash, extractionMethod: 'html' };
 };
+
+function bufferToText(buffer: Buffer): string {
+  return buffer.toString('utf8').replace(/\u0000/g, '').trim();
+}
+
+function csvToMarkdown(buffer: Buffer): string {
+  const rows = parseCsv(buffer.toString('utf8'), {
+    bom: true,
+    relaxColumnCount: true,
+    skipEmptyLines: true,
+  }) as string[][];
+
+  if (!rows.length) return '';
+
+  const maxRows = rows.slice(0, 1000);
+  const columnCount = Math.max(...maxRows.map(row => row.length));
+  const normalizedRows = maxRows.map(row => Array.from({ length: columnCount }, (_, index) => String(row[index] ?? '').replace(/\|/g, '\\|')));
+  const [header, ...body] = normalizedRows;
+  const separator = Array.from({ length: columnCount }, () => '---');
+
+  return [header, separator, ...body]
+    .map(row => `| ${row.join(' | ')} |`)
+    .join('\n');
+}
+
+function normalizeStructuredText(content: string): ExtractedContent {
+  const cleaned = cleanMarkdown(content);
+  return {
+    content: cleaned,
+    contentHash: hashContent(cleaned),
+    extractionMethod: 'document',
+  };
+}
+
+export async function extractFromBuffer(buffer: Buffer, contentType: string, url: string): Promise<ExtractedContent> {
+  const normalizedType = contentType.toLowerCase().split(';')[0].trim();
+  const pathname = new URL(url).pathname.toLowerCase();
+
+  if (normalizedType === 'application/pdf' || pathname.endsWith('.pdf')) {
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const parsed = await parser.getText();
+      return { ...normalizeStructuredText(parsed.text), extractionMethod: 'pdf' };
+    } finally {
+      await parser.destroy();
+    }
+  }
+
+  if (
+    normalizedType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    pathname.endsWith('.docx')
+  ) {
+    const parsed = await mammoth.extractRawText({ buffer });
+    return { ...normalizeStructuredText(parsed.value), extractionMethod: 'docx' };
+  }
+
+  if (normalizedType === 'text/csv' || pathname.endsWith('.csv')) {
+    return { ...normalizeStructuredText(csvToMarkdown(buffer)), extractionMethod: 'csv' };
+  }
+
+  if (normalizedType === 'application/json' || pathname.endsWith('.json')) {
+    const text = bufferToText(buffer);
+    try {
+      return { ...normalizeStructuredText(JSON.stringify(JSON.parse(text), null, 2)), extractionMethod: 'json' };
+    } catch {
+      return { ...normalizeStructuredText(text), extractionMethod: 'json' };
+    }
+  }
+
+  if (
+    normalizedType.startsWith('text/') ||
+    normalizedType.includes('xml') ||
+    pathname.endsWith('.txt') ||
+    pathname.endsWith('.xml') ||
+    pathname.endsWith('.md')
+  ) {
+    return { ...normalizeStructuredText(bufferToText(buffer)), extractionMethod: 'text' };
+  }
+
+  throw new UnsupportedContentError(`Unsupported content type: ${contentType || 'unknown'}`);
+}

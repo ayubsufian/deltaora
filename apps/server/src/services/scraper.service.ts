@@ -1,30 +1,61 @@
-import { chromium, Browser, BrowserContext } from 'playwright';
+import { chromium, Browser, BrowserContext, BrowserContextOptions } from 'playwright';
+import { CrawlStatus, ICrawlerAuthConfig, ICrawlerConfig } from '@deltaora/shared-types';
 import { env } from '../config/env';
-
-// ── 2026 Standard: Stealth Browser Singleton ──
-// We maintain a single browser instance and rotate contexts per request
-// to minimize resource usage while ensuring clean sessions.
+import { decryptSecret } from './security.service';
+import { assertRobotsAllowed } from './robots.service';
+import { fetchBufferSafely } from './safeHttp.service';
+import { assertSafeScrapeUrl } from './urlSafety.service';
+import { extractCleanText, extractFromBuffer } from './extractor.service';
 
 let browserInstance: Browser | null = null;
+const hostLastStartedAt = new Map<string, number>();
 
-// Realistic User-Agent rotation pool — 2026 standard practice
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:128.0) Gecko/20100101 Firefox/128.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
-];
+export class CrawlError extends Error {
+  code: string;
+  statusCode: number;
+  crawlStatus: CrawlStatus;
 
-function getRandomUserAgent(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  constructor(message: string, code: string, crawlStatus: CrawlStatus, statusCode = 500) {
+    super(message);
+    this.name = 'CrawlError';
+    this.code = code;
+    this.crawlStatus = crawlStatus;
+    this.statusCode = statusCode;
+  }
 }
 
-/**
- * Get or create a shared Chromium browser instance.
- * Uses stealth launch args to evade basic headless detection.
- */
+export interface ScrapeResult {
+  content: string;
+  contentHash: string;
+  finalUrl: string;
+  httpStatus: number;
+  contentType: string;
+  extractionMethod: string;
+  blockedSubresourceCount: number;
+}
+
+interface InternalCrawlerConfig extends ICrawlerConfig {
+  auth?: ICrawlerAuthConfig;
+}
+
+const DOCUMENT_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.csv',
+  '.json',
+  '.xml',
+  '.txt',
+  '.md',
+];
+
+const DISALLOWED_HEADER_NAMES = new Set([
+  'host',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'upgrade',
+]);
+
 export const getBrowser = async (): Promise<Browser> => {
   if (!browserInstance || !browserInstance.isConnected()) {
     browserInstance = await chromium.launch({
@@ -33,52 +64,93 @@ export const getBrowser = async (): Promise<Browser> => {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',  // Hide automation flag
-        '--disable-infobars',
-        '--window-size=1920,1080',
-        '--start-maximized',
+        '--window-size=1365,900',
       ],
     });
   }
   return browserInstance;
 };
 
-/**
- * Create a stealth browser context with randomized fingerprint.
- * 
- * 2026 Standard: Each scrape uses a fresh context with:
- * - Rotated User-Agent
- * - Realistic viewport and locale settings
- * - Optional proxy support via PROXY_URL env var
- */
-async function createStealthContext(browser: Browser): Promise<BrowserContext> {
-  const proxyUrl = env.PROXY_URL;
+function hydrateCrawlerConfig(config?: ICrawlerConfig, crawlerAuthEncrypted?: string): InternalCrawlerConfig {
+  if (!crawlerAuthEncrypted) return config || {};
 
-  const contextOptions: any = {
-    userAgent: getRandomUserAgent(),
-    viewport: { width: 1920, height: 1080 },
+  try {
+    return {
+      ...(config || {}),
+      auth: JSON.parse(decryptSecret(crawlerAuthEncrypted)) as ICrawlerAuthConfig,
+    };
+  } catch {
+    throw new CrawlError('Stored crawler auth configuration could not be decrypted', 'invalid_crawler_auth', CrawlStatus.FAILED);
+  }
+}
+
+function sanitizeHeaders(headers?: Record<string, string>) {
+  const sanitized: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(headers || {})) {
+    const normalizedName = name.toLowerCase();
+    if (!DISALLOWED_HEADER_NAMES.has(normalizedName)) {
+      sanitized[name] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+function isLikelyHtml(contentType: string, url: string) {
+  const type = contentType.toLowerCase().split(';')[0].trim();
+  const pathname = new URL(url).pathname.toLowerCase();
+
+  if (type.includes('html') || type === 'application/xhtml+xml') return true;
+  if (type && !type.startsWith('text/html')) return false;
+  return !DOCUMENT_EXTENSIONS.some(extension => pathname.endsWith(extension));
+}
+
+function assertSuccessfulHttpStatus(status: number, url: string) {
+  if (status === 401 || status === 403) {
+    throw new CrawlError(`Authentication or permission is required for ${url}`, 'auth_required', CrawlStatus.AUTH_REQUIRED, status);
+  }
+
+  if (status >= 400) {
+    throw new CrawlError(`Target returned HTTP ${status} for ${url}`, 'bad_http_status', CrawlStatus.FAILED, status);
+  }
+}
+
+async function waitForHostSlot(origin: string, minDelayMs: number) {
+  if (minDelayMs <= 0) return;
+
+  const lastStartedAt = hostLastStartedAt.get(origin) || 0;
+  const waitMs = Math.max(0, lastStartedAt + minDelayMs - Date.now());
+
+  if (waitMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+
+  hostLastStartedAt.set(origin, Date.now());
+}
+
+async function createContext(browser: Browser, targetUrl: string, config: InternalCrawlerConfig): Promise<BrowserContext> {
+  const proxyUrl = env.PROXY_URL;
+  const customHeaders = sanitizeHeaders(config.auth?.headers);
+
+  const contextOptions: BrowserContextOptions = {
+    userAgent: env.CRAWLER_USER_AGENT,
+    viewport: { width: 1365, height: 900 },
     locale: 'en-US',
     timezoneId: 'America/New_York',
-    // Mask WebDriver property — key stealth technique
     javaScriptEnabled: true,
-    ignoreHTTPSErrors: true,
-    // Accept common headers like a real browser
+    ignoreHTTPSErrors: false,
     extraHTTPHeaders: {
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
       'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Sec-Ch-Ua': '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
-      'Sec-Ch-Ua-Mobile': '?0',
-      'Sec-Ch-Ua-Platform': '"Windows"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
+      ...customHeaders,
     },
   };
 
-  // Optional rotating proxy support (BrightData, Oxylabs, ScraperAPI, etc.)
+  if (config.auth?.storageState) {
+    contextOptions.storageState = config.auth.storageState as any;
+  }
+
   if (proxyUrl) {
     const proxyUrlObj = new URL(proxyUrl);
     contextOptions.proxy = {
@@ -90,101 +162,231 @@ async function createStealthContext(browser: Browser): Promise<BrowserContext> {
 
   const context = await browser.newContext(contextOptions);
 
-  // Inject anti-detection scripts before any page loads
-  await context.addInitScript(() => {
-    // Override navigator.webdriver (the #1 detection vector)
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => false,
-    });
-
-    // Override chrome.runtime to look like a real Chrome install
-    (window as any).chrome = {
-      runtime: {},
-      loadTimes: function () { return {}; },
-      csi: function () { return {}; },
-    };
-
-    // Override Permissions API
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters: any) =>
-      parameters.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
-        : originalQuery(parameters);
-
-    // Override plugins and languages to look realistic
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [1, 2, 3, 4, 5],
-    });
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-    });
-  });
+  if (config.auth?.cookies?.length) {
+    await context.addCookies(config.auth.cookies.map(cookie => ({
+      ...cookie,
+      url: cookie.domain ? undefined : targetUrl,
+      domain: cookie.domain,
+      path: cookie.path || '/',
+    })));
+  }
 
   return context;
 }
 
-/**
- * Fetch the fully rendered HTML of a URL using a stealth browser.
- *
- * 2026 Standard:
- * - Uses smart wait strategy: waits for DOM content + network settle
- * - Implements exponential backoff retry (3 attempts)
- * - Randomized delays between actions to appear human
- * - Fresh context per request to avoid session contamination
- */
-export const fetchPageHTML = async (url: string, retries = 3): Promise<string> => {
-  const browser = await getBrowser();
-  let lastError: Error | null = null;
+async function acceptCommonCookieBanners(page: Awaited<ReturnType<BrowserContext['newPage']>>) {
+  const buttonNames = [
+    /^(accept|agree|allow|ok)$/i,
+    /accept all/i,
+    /allow all/i,
+    /i agree/i,
+    /got it/i,
+  ];
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    const context = await createStealthContext(browser);
-    const page = await context.newPage();
+  for (const name of buttonNames) {
+    const button = page.getByRole('button', { name }).first();
+    if (await button.count().catch(() => 0)) {
+      await button.click({ timeout: 1500 }).catch(() => undefined);
+      return;
+    }
+  }
+}
 
-    try {
-      // Random pre-navigation delay (50-300ms) to look human
-      await page.waitForTimeout(50 + Math.random() * 250);
+async function scrollToBottom(page: Awaited<ReturnType<BrowserContext['newPage']>>) {
+  for (let index = 0; index < 8; index++) {
+    const reachedBottom = await page.evaluate(() => {
+      const before = window.scrollY;
+      window.scrollTo(0, document.body.scrollHeight);
+      return before === window.scrollY || window.innerHeight + window.scrollY >= document.body.scrollHeight;
+    });
+    await page.waitForTimeout(500);
+    if (reachedBottom) break;
+  }
+}
 
-      // Navigate with a robust wait strategy:
-      // 1. Wait for DOM content loaded first (fast)
-      // 2. Then wait for network to settle (dynamic content)
-      await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45000,
-      });
+async function detectBlockedStates(page: Awaited<ReturnType<BrowserContext['newPage']>>, hasAuthConfig: boolean) {
+  const captchaSelectors = [
+    'iframe[src*="captcha"]',
+    'iframe[src*="hcaptcha"]',
+    'iframe[src*="turnstile"]',
+    '.g-recaptcha',
+    '.h-captcha',
+    '[data-sitekey]',
+    '#challenge-running',
+  ];
 
-      // Smart network settle: wait until no more than 2 connections for 500ms
-      // This is more reliable than 'networkidle' which can hang on long-polling sites
-      await page.waitForLoadState('networkidle').catch(() => {
-        // If networkidle times out (e.g. on sites with websockets), proceed anyway
-      });
-
-      // Additional wait for JS-rendered content
-      await page.waitForTimeout(1000 + Math.random() * 500);
-
-      const html = await page.content();
-      return html;
-
-    } catch (error) {
-      lastError = error as Error;
-      console.warn(`Scrape attempt ${attempt}/${retries} failed for ${url}: ${lastError.message}`);
-
-      // Exponential backoff: 2s, 4s, 8s
-      if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
-      }
-    } finally {
-      await page.close();
-      await context.close();
+  for (const selector of captchaSelectors) {
+    if (await page.locator(selector).count().catch(() => 0)) {
+      throw new CrawlError('Target presented a CAPTCHA or bot challenge', 'captcha_or_bot_challenge', CrawlStatus.BLOCKED, 403);
     }
   }
 
-  throw new Error(`Failed to fetch ${url} after ${retries} attempts: ${lastError?.message}`);
+  const bodyText = await page.locator('body').innerText({ timeout: 2000 }).catch(() => '');
+  if (/checking your browser|verify you are human|captcha|access denied|temporarily blocked/i.test(bodyText)) {
+    throw new CrawlError('Target presented a bot challenge or access block', 'captcha_or_bot_challenge', CrawlStatus.BLOCKED, 403);
+  }
+
+  const hasPasswordInput = await page.locator('input[type="password"]').count().catch(() => 0);
+  if (hasPasswordInput > 0) {
+    throw new CrawlError(
+      hasAuthConfig ? 'Provided auth did not reach the protected content' : 'Target requires login credentials or a saved session',
+      'auth_required',
+      CrawlStatus.AUTH_REQUIRED,
+      401
+    );
+  }
+}
+
+async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfig): Promise<ScrapeResult> {
+  const browser = await getBrowser();
+  const context = await createContext(browser, targetUrl, config);
+  const page = await context.newPage();
+  const unsafeRequestCache = new Map<string, boolean>();
+  let blockedSubresourceCount = 0;
+
+  await page.route('**/*', async route => {
+    const requestUrl = route.request().url();
+    const cached = unsafeRequestCache.get(requestUrl);
+
+    if (cached === false) {
+      blockedSubresourceCount += 1;
+      await route.abort('blockedbyclient');
+      return;
+    }
+
+    try {
+      if (cached === undefined) {
+        await assertSafeScrapeUrl(requestUrl, 'resource URL');
+        unsafeRequestCache.set(requestUrl, true);
+      }
+      await route.continue();
+    } catch {
+      unsafeRequestCache.set(requestUrl, false);
+      blockedSubresourceCount += 1;
+      await route.abort('blockedbyclient');
+    }
+  });
+
+  try {
+    const response = await page.goto(targetUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45_000,
+    });
+
+    if (!response) {
+      throw new CrawlError(`Target did not return a document response for ${targetUrl}`, 'no_document_response', CrawlStatus.FAILED);
+    }
+
+    const status = response.status();
+    const finalUrl = response.url();
+    const contentType = response.headers()['content-type'] || '';
+
+    await assertSafeScrapeUrl(finalUrl, 'final URL');
+    assertSuccessfulHttpStatus(status, finalUrl);
+
+    if (!isLikelyHtml(contentType, finalUrl)) {
+      const downloaded = await fetchBufferSafely(finalUrl, { headers: sanitizeHeaders(config.auth?.headers) });
+      assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl);
+      const extracted = await extractFromBuffer(downloaded.buffer, downloaded.contentType || contentType, downloaded.finalUrl);
+
+      return {
+        ...extracted,
+        finalUrl: downloaded.finalUrl,
+        httpStatus: downloaded.status,
+        contentType: downloaded.contentType || contentType,
+        blockedSubresourceCount,
+      };
+    }
+
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => undefined);
+
+    if (config.behavior?.acceptCookieBanners ?? true) {
+      await acceptCommonCookieBanners(page);
+    }
+
+    if (config.behavior?.waitForSelector) {
+      await page.waitForSelector(config.behavior.waitForSelector, { timeout: 15_000 });
+    }
+
+    for (const selector of config.behavior?.clickSelectors || []) {
+      await page.locator(selector).first().click({ timeout: 5000 });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+    }
+
+    if (config.behavior?.scrollToBottom) {
+      await scrollToBottom(page);
+    }
+
+    await page.waitForTimeout(config.behavior?.waitAfterLoadMs ?? 1500);
+    await detectBlockedStates(page, Boolean(config.auth));
+
+    const html = await page.content();
+    const extracted = extractCleanText(html, finalUrl, config.extraction);
+
+    if (!extracted.content) {
+      throw new CrawlError('No extractable text content was found', 'empty_content', CrawlStatus.FAILED);
+    }
+
+    return {
+      ...extracted,
+      finalUrl,
+      httpStatus: status,
+      contentType,
+      blockedSubresourceCount,
+    };
+  } finally {
+    await page.close().catch(() => undefined);
+    await context.close().catch(() => undefined);
+  }
+}
+
+export const scrapeTarget = async (
+  rawUrl: string,
+  crawlerConfig?: ICrawlerConfig,
+  crawlerAuthEncrypted?: string
+): Promise<ScrapeResult> => {
+  const targetUrl = await assertSafeScrapeUrl(rawUrl);
+  const config = hydrateCrawlerConfig(crawlerConfig, crawlerAuthEncrypted);
+  let hostDelayMs = env.CRAWLER_MIN_HOST_DELAY_MS;
+
+  if (config.respectRobots ?? true) {
+    const robots = await assertRobotsAllowed(targetUrl.href);
+    hostDelayMs = Math.max(hostDelayMs, robots?.crawlDelayMs || 0);
+  }
+
+  await waitForHostSlot(targetUrl.origin, hostDelayMs);
+
+  const head = await fetchBufferSafely(targetUrl.href, {
+    method: 'HEAD',
+    headers: sanitizeHeaders(config.auth?.headers),
+  }).catch(() => null);
+
+  if (head && head.status < 400 && !isLikelyHtml(head.contentType, head.finalUrl)) {
+    const downloaded = await fetchBufferSafely(head.finalUrl, { headers: sanitizeHeaders(config.auth?.headers) });
+    assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl);
+    const extracted = await extractFromBuffer(downloaded.buffer, downloaded.contentType || head.contentType, downloaded.finalUrl);
+
+    if (!extracted.content) {
+      throw new CrawlError('No extractable text content was found', 'empty_content', CrawlStatus.FAILED);
+    }
+
+    return {
+      ...extracted,
+      finalUrl: downloaded.finalUrl,
+      httpStatus: downloaded.status,
+      contentType: downloaded.contentType || head.contentType,
+      blockedSubresourceCount: 0,
+    };
+  }
+
+  return fetchRenderedHtml(targetUrl.href, config);
 };
 
-/**
- * Gracefully shut down the browser instance.
- * Called during server shutdown for clean resource cleanup.
- */
+export const fetchPageHTML = async (url: string): Promise<string> => {
+  const result = await fetchRenderedHtml(url, {});
+  return result.content;
+};
+
 export const closeBrowser = async (): Promise<void> => {
   if (browserInstance) {
     await browserInstance.close();
