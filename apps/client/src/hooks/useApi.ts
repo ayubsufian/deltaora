@@ -55,6 +55,17 @@ interface MonitoredPage {
   lastHttpStatus?: number;
   lastContentType?: string;
   lastResolvedUrl?: string;
+  lastCrawlRecommendation?: string;
+  crawlerConfig?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CrawlerAuthSession {
+  _id: string;
+  name: string;
+  origin: string;
+  lastUsedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -82,13 +93,69 @@ export function useCreatePage() {
     mutationFn: async (body: { title: string;  url: string;
   category: string;
   importance: string;
-  checkInterval: number; }) => {
+  checkInterval: number;
+  crawlerConfig?: any; }) => {
       const { data } = await api.post('/pages', body);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pages'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useDiscoverSite() {
+  return useMutation({
+    mutationFn: async (body: {
+      url: string;
+      maxDepth?: number;
+      maxPages?: number;
+      includeSubdomains?: boolean;
+      includeSitemaps?: boolean;
+      respectRobots?: boolean;
+    }) => {
+      const { data } = await api.post('/pages/discover', body);
+      return data as {
+        count: number;
+        urls: Array<{ url: string; depth: number; source: string }>;
+      };
+    },
+  });
+}
+
+export function useCrawlerAuthSessions() {
+  return useQuery({
+    queryKey: ['crawler-auth-sessions'],
+    queryFn: async () => {
+      const { data } = await api.get('/pages/auth-sessions');
+      return data as CrawlerAuthSession[];
+    },
+  });
+}
+
+export function useCreateCrawlerAuthSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { name: string; origin: string; storageState: Record<string, unknown> }) => {
+      const { data } = await api.post('/pages/auth-sessions', body);
+      return data as CrawlerAuthSession;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['crawler-auth-sessions'] });
+    },
+  });
+}
+
+export function useDeleteCrawlerAuthSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.delete(`/pages/auth-sessions/${id}`);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['crawler-auth-sessions'] });
     },
   });
 }

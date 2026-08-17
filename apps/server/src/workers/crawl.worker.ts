@@ -22,7 +22,9 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
     if (!page) throw new Error('Page not found');
     const workspaceId = page.workspaceId;
 
-    const scrape = await scrapeTarget(page.url, page.crawlerConfig, page.crawlerAuthEncrypted);
+    const scrape = await scrapeTarget(page.url, page.crawlerConfig, page.crawlerAuthEncrypted, {
+      workspaceId: workspaceId.toString(),
+    });
     const { content, contentHash } = scrape;
 
     const latestSnapshot = await Snapshot.findOne({ pageId, workspaceId }).sort({ createdAt: -1 });
@@ -61,17 +63,33 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       lastHttpStatus: scrape.httpStatus,
       lastContentType: scrape.contentType,
       lastResolvedUrl: scrape.finalUrl,
+      lastCrawlRecommendation: undefined,
     });
     await JobModel.findByIdAndUpdate(dbJobId, { status: JobStatus.COMPLETED, completedAt: new Date() });
 
   } catch (error) {
     const err = error as Error & { code?: string; statusCode?: number; crawlStatus?: CrawlStatus };
-    const crawlStatus =
+    const baseCrawlStatus =
       err instanceof CrawlError ? err.crawlStatus :
       err.statusCode === 403 ? CrawlStatus.BLOCKED :
       err.statusCode === 415 ? CrawlStatus.UNSUPPORTED :
       err.statusCode === 401 ? CrawlStatus.AUTH_REQUIRED :
       CrawlStatus.FAILED;
+    const page = await MonitoredPage.findById(pageId);
+    const shouldManualReview =
+      baseCrawlStatus === CrawlStatus.BLOCKED &&
+      page?.crawlerConfig?.compliance?.blockedHandling === 'manual_review';
+    const crawlStatus = shouldManualReview ? CrawlStatus.MANUAL_REVIEW : baseCrawlStatus;
+    const recommendation =
+      crawlStatus === CrawlStatus.MANUAL_REVIEW
+        ? 'Review the site manually or use an official API/webhook; Deltaora detected an access block and will not bypass anti-bot controls.'
+        : crawlStatus === CrawlStatus.AUTH_REQUIRED
+          ? 'Connect a recorded auth session or provide authorized cookies/storage state for this workspace.'
+          : crawlStatus === CrawlStatus.UNSUPPORTED
+            ? 'Enable binary fingerprinting or add a supported extractor for this content type.'
+            : err.code === 'robots_disallowed'
+              ? 'Robots policy prevents crawling this URL. Keep robots enabled for public sites or use an approved enterprise allowlist for owned/internal sites.'
+              : undefined;
 
     await MonitoredPage.findByIdAndUpdate(pageId, {
       lastChecked: new Date(),
@@ -79,6 +97,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       lastCrawlError: err.message,
       lastCrawlCode: err.code || 'crawl_failed',
       lastHttpStatus: err.statusCode,
+      lastCrawlRecommendation: recommendation,
     });
     await JobModel.findByIdAndUpdate(dbJobId, {
       status: JobStatus.FAILED,

@@ -191,6 +191,10 @@ function hashContent(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
 
+function hashBuffer(buffer: Buffer): string {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
 /**
  * Extract clean, structured Markdown content from raw HTML.
  * 
@@ -266,6 +270,57 @@ function normalizeStructuredText(content: string): ExtractedContent {
   };
 }
 
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function extractTextTags(xml: string): string[] {
+  return Array.from(xml.matchAll(/<[^>]*(?:t|v)[^>]*>([\s\S]*?)<\/[^>]+>/g))
+    .map(match => decodeXmlText(match[1].replace(/<[^>]+>/g, '').trim()))
+    .filter(Boolean);
+}
+
+async function extractZipXmlText(buffer: Buffer, folderPrefix: string): Promise<string> {
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(buffer);
+  const entries = Object.values(zip.files)
+    .filter(file => !file.dir && file.name.startsWith(folderPrefix) && file.name.endsWith('.xml'))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  const sections: string[] = [];
+  for (const entry of entries) {
+    const xml = await entry.async('string');
+    const text = extractTextTags(xml).join(' ');
+    if (text) {
+      sections.push(`## ${entry.name}\n\n${text}`);
+    }
+  }
+
+  return sections.join('\n\n');
+}
+
+function binaryFingerprint(buffer: Buffer, contentType: string, url: string, extractionMethod: string): ExtractedContent {
+  const content = [
+    `# Binary resource`,
+    ``,
+    `URL: ${url}`,
+    `Content type: ${contentType || 'unknown'}`,
+    `Bytes: ${buffer.byteLength}`,
+    `SHA-256: ${hashBuffer(buffer)}`,
+  ].join('\n');
+
+  return {
+    content,
+    contentHash: hashContent(content),
+    extractionMethod,
+  };
+}
+
 export async function extractFromBuffer(buffer: Buffer, contentType: string, url: string): Promise<ExtractedContent> {
   const normalizedType = contentType.toLowerCase().split(';')[0].trim();
   const pathname = new URL(url).pathname.toLowerCase();
@@ -289,6 +344,20 @@ export async function extractFromBuffer(buffer: Buffer, contentType: string, url
     return { ...normalizeStructuredText(parsed.value), extractionMethod: 'docx' };
   }
 
+  if (
+    normalizedType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    pathname.endsWith('.xlsx')
+  ) {
+    return { ...normalizeStructuredText(await extractZipXmlText(buffer, 'xl/')), extractionMethod: 'xlsx' };
+  }
+
+  if (
+    normalizedType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    pathname.endsWith('.pptx')
+  ) {
+    return { ...normalizeStructuredText(await extractZipXmlText(buffer, 'ppt/slides/')), extractionMethod: 'pptx' };
+  }
+
   if (normalizedType === 'text/csv' || pathname.endsWith('.csv')) {
     return { ...normalizeStructuredText(csvToMarkdown(buffer)), extractionMethod: 'csv' };
   }
@@ -310,6 +379,18 @@ export async function extractFromBuffer(buffer: Buffer, contentType: string, url
     pathname.endsWith('.md')
   ) {
     return { ...normalizeStructuredText(bufferToText(buffer)), extractionMethod: 'text' };
+  }
+
+  if (normalizedType.startsWith('image/')) {
+    return binaryFingerprint(buffer, contentType, url, 'image');
+  }
+
+  if (normalizedType.startsWith('audio/')) {
+    return binaryFingerprint(buffer, contentType, url, 'audio');
+  }
+
+  if (normalizedType.startsWith('video/')) {
+    return binaryFingerprint(buffer, contentType, url, 'video');
   }
 
   throw new UnsupportedContentError(`Unsupported content type: ${contentType || 'unknown'}`);

@@ -69,9 +69,11 @@ export async function assertRobotsAllowed(rawTargetUrl: string) {
     throw new RobotsBlockedError(`robots.txt blocks access to ${targetUrl.origin}`);
   }
 
-  if (entry.status === 'unavailable') {
+  if (entry.status === 'unavailable' && env.CRAWLER_ROBOTS_UNAVAILABLE_POLICY === 'fail_closed') {
     throw new RobotsBlockedError(`robots.txt is unavailable for ${targetUrl.origin}; crawler is failing closed`);
   }
+
+  if (entry.status === 'unavailable') return { crawlDelayMs: 0 };
 
   if (!entry.body) return;
 

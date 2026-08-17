@@ -51,6 +51,8 @@ const envSchema = z.object({
   CRAWLER_CONTACT_URL: z.string().url().optional(),
   CRAWLER_RESPECT_ROBOTS: booleanFromEnv(true),
   CRAWLER_ALLOW_PRIVATE_NETWORKS: booleanFromEnv(false),
+  CRAWLER_PRIVATE_NETWORK_ALLOWLIST: z.string().optional(),
+  CRAWLER_ROBOTS_UNAVAILABLE_POLICY: z.enum(['fail_closed', 'fail_open']).default('fail_closed'),
   CRAWLER_MAX_BYTES: z.coerce.number().int().positive().max(50_000_000).default(10_000_000),
   CRAWLER_MAX_REDIRECTS: z.coerce.number().int().min(0).max(10).default(5),
   CRAWLER_MIN_HOST_DELAY_MS: z.coerce.number().int().min(0).max(300_000).default(5000),

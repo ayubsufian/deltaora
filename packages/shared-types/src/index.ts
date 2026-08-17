@@ -10,6 +10,7 @@ export const CrawlStatus = {
   BLOCKED: 'blocked',
   UNSUPPORTED: 'unsupported',
   AUTH_REQUIRED: 'auth_required',
+  MANUAL_REVIEW: 'manual_review',
 } as const;
 export type CrawlStatus = typeof CrawlStatus[keyof typeof CrawlStatus];
 
@@ -71,6 +72,7 @@ export interface IMonitoredPage {
   lastHttpStatus?: number;
   lastContentType?: string;
   lastResolvedUrl?: string;
+  lastCrawlRecommendation?: string;
   crawlerConfig?: ICrawlerConfig;
   createdAt: Date;
 }
@@ -93,7 +95,16 @@ export interface ICrawlerAuthConfig {
 }
 
 export interface ICrawlerConfig {
+  authSessionId?: string;
   respectRobots?: boolean;
+  discovery?: {
+    enabled?: boolean;
+    maxDepth?: number;
+    maxPages?: number;
+    includeSubdomains?: boolean;
+    includeSitemaps?: boolean;
+    followCanonical?: boolean;
+  };
   extraction?: {
     includeSelectors?: string[];
     excludeSelectors?: string[];
@@ -101,9 +112,27 @@ export interface ICrawlerConfig {
   behavior?: {
     waitForSelector?: string;
     clickSelectors?: string[];
+    clickText?: string[];
     scrollToBottom?: boolean;
     acceptCookieBanners?: boolean;
     waitAfterLoadMs?: number;
+    locale?: string;
+    timezoneId?: string;
+  };
+  apiCapture?: {
+    enabled?: boolean;
+    mode?: 'append' | 'prefer';
+    maxResponses?: number;
+    includeUrlPatterns?: string[];
+    excludeUrlPatterns?: string[];
+  };
+  content?: {
+    screenshotDiff?: boolean;
+    binaryFingerprint?: boolean;
+  };
+  compliance?: {
+    robotsPolicy?: 'respect' | 'ignore';
+    blockedHandling?: 'fail' | 'manual_review';
   };
 }
 

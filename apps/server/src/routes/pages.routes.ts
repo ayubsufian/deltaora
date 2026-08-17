@@ -1,9 +1,20 @@
 import { Router } from 'express';
-import { getPages, createPage, getPageDetails, updatePage, deletePage, togglePageStatus } from '../controllers/pages.controller';
+import {
+  getPages,
+  createPage,
+  discoverSite,
+  getCrawlerAuthSessions,
+  createCrawlerAuthSession,
+  deleteCrawlerAuthSession,
+  getPageDetails,
+  updatePage,
+  deletePage,
+  togglePageStatus,
+} from '../controllers/pages.controller';
 import { requireAuth, requireVerifiedEmail } from '../middleware/auth';
 import { resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
-import { createPageSchema, updatePageSchema } from '@deltaora/validation';
+import { createCrawlerAuthSessionSchema, createPageSchema, discoverSiteSchema, updatePageSchema } from '@deltaora/validation';
 import { z } from 'zod';
 
 const router = Router();
@@ -66,6 +77,14 @@ router.get('/', getPages);
  *         description: Page added successfully
  */
 router.post('/', validate(createPageSchema), createPage);
+
+router.post('/discover', validate(discoverSiteSchema), discoverSite);
+
+router.get('/auth-sessions', getCrawlerAuthSessions);
+
+router.post('/auth-sessions', validate(createCrawlerAuthSessionSchema), createCrawlerAuthSession);
+
+router.delete('/auth-sessions/:sessionId', deleteCrawlerAuthSession);
 
 /**
  * @swagger

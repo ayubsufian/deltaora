@@ -23,6 +23,7 @@ const MonitoredPageSchema = new Schema<IMonitoredPageDocument>(
     lastHttpStatus: { type: Number },
     lastContentType: { type: String },
     lastResolvedUrl: { type: String },
+    lastCrawlRecommendation: { type: String },
     crawlerConfig: { type: Schema.Types.Mixed },
     crawlerAuthEncrypted: { type: String, select: false },
   },

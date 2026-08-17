@@ -1,4 +1,5 @@
 import { chromium, Browser, BrowserContext, BrowserContextOptions } from 'playwright';
+import crypto from 'crypto';
 import { CrawlStatus, ICrawlerAuthConfig, ICrawlerConfig } from '@deltaora/shared-types';
 import { env } from '../config/env';
 import { decryptSecret } from './security.service';
@@ -6,6 +7,7 @@ import { assertRobotsAllowed } from './robots.service';
 import { fetchBufferSafely } from './safeHttp.service';
 import { assertSafeScrapeUrl } from './urlSafety.service';
 import { extractCleanText, extractFromBuffer } from './extractor.service';
+import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
 
 let browserInstance: Browser | null = null;
 const hostLastStartedAt = new Map<string, number>();
@@ -38,14 +40,37 @@ interface InternalCrawlerConfig extends ICrawlerConfig {
   auth?: ICrawlerAuthConfig;
 }
 
+interface ScrapeContext {
+  workspaceId?: string;
+}
+
+interface CapturedApiResponse {
+  url: string;
+  status: number;
+  contentType: string;
+  body: unknown;
+}
+
 const DOCUMENT_EXTENSIONS = [
   '.pdf',
   '.docx',
   '.csv',
+  '.xlsx',
+  '.pptx',
   '.json',
   '.xml',
   '.txt',
   '.md',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.svg',
+  '.mp3',
+  '.wav',
+  '.mp4',
+  '.webm',
 ];
 
 const DISALLOWED_HEADER_NAMES = new Set([
@@ -71,13 +96,42 @@ export const getBrowser = async (): Promise<Browser> => {
   return browserInstance;
 };
 
-function hydrateCrawlerConfig(config?: ICrawlerConfig, crawlerAuthEncrypted?: string): InternalCrawlerConfig {
-  if (!crawlerAuthEncrypted) return config || {};
+function hashContent(content: string): string {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
+
+async function hydrateCrawlerConfig(
+  config?: ICrawlerConfig,
+  crawlerAuthEncrypted?: string,
+  scrapeContext: ScrapeContext = {}
+): Promise<InternalCrawlerConfig> {
+  const hydrated: InternalCrawlerConfig = { ...(config || {}) };
+
+  if (hydrated.authSessionId && scrapeContext.workspaceId) {
+    const session = await CrawlerAuthSession.findOne({
+      _id: hydrated.authSessionId,
+      workspaceId: scrapeContext.workspaceId,
+    }).select('+storageStateEncrypted');
+
+    if (session) {
+      hydrated.auth = {
+        ...(hydrated.auth || {}),
+        storageState: JSON.parse(decryptSecret(session.storageStateEncrypted)),
+      };
+      await CrawlerAuthSession.findByIdAndUpdate(session.id, { lastUsedAt: new Date() });
+    }
+  }
+
+  if (!crawlerAuthEncrypted) return hydrated;
 
   try {
+    const authFromPage = JSON.parse(decryptSecret(crawlerAuthEncrypted)) as ICrawlerAuthConfig;
     return {
-      ...(config || {}),
-      auth: JSON.parse(decryptSecret(crawlerAuthEncrypted)) as ICrawlerAuthConfig,
+      ...hydrated,
+      auth: {
+        ...(hydrated.auth || {}),
+        ...authFromPage,
+      },
     };
   } catch {
     throw new CrawlError('Stored crawler auth configuration could not be decrypted', 'invalid_crawler_auth', CrawlStatus.FAILED);
@@ -136,13 +190,13 @@ async function createContext(browser: Browser, targetUrl: string, config: Intern
   const contextOptions: BrowserContextOptions = {
     userAgent: env.CRAWLER_USER_AGENT,
     viewport: { width: 1365, height: 900 },
-    locale: 'en-US',
-    timezoneId: 'America/New_York',
+    locale: config.behavior?.locale || 'en-US',
+    timezoneId: config.behavior?.timezoneId || 'America/New_York',
     javaScriptEnabled: true,
     ignoreHTTPSErrors: false,
     extraHTTPHeaders: {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Language': config.behavior?.locale ? `${config.behavior.locale},en;q=0.8` : 'en-US,en;q=0.9',
       ...customHeaders,
     },
   };
@@ -172,6 +226,59 @@ async function createContext(browser: Browser, targetUrl: string, config: Intern
   }
 
   return context;
+}
+
+function matchesPattern(url: string, patterns: string[] = []) {
+  if (!patterns.length) return false;
+
+  return patterns.some(pattern => {
+    try {
+      return new RegExp(pattern).test(url);
+    } catch {
+      return url.includes(pattern);
+    }
+  });
+}
+
+function shouldCaptureApiResponse(url: string, contentType: string, config: InternalCrawlerConfig) {
+  if (!config.apiCapture?.enabled) return false;
+  if (!contentType.toLowerCase().includes('json')) return false;
+  if (matchesPattern(url, config.apiCapture.excludeUrlPatterns)) return false;
+  if (config.apiCapture.includeUrlPatterns?.length) {
+    return matchesPattern(url, config.apiCapture.includeUrlPatterns);
+  }
+  return true;
+}
+
+function capturedApiToMarkdown(responses: CapturedApiResponse[]) {
+  if (!responses.length) return '';
+
+  return [
+    '# Captured API responses',
+    ...responses.map((response, index) => [
+      `## Response ${index + 1}`,
+      '',
+      `URL: ${response.url}`,
+      `Status: ${response.status}`,
+      `Content type: ${response.contentType}`,
+      '',
+      '```json',
+      JSON.stringify(response.body, null, 2),
+      '```',
+    ].join('\n')),
+  ].join('\n\n');
+}
+
+function mergeExtractedContent(content: string, extraContent: string, mode: 'append' | 'prefer' = 'append') {
+  if (!extraContent) {
+    return { content, contentHash: hashContent(content) };
+  }
+
+  const merged = mode === 'prefer'
+    ? extraContent
+    : [content, extraContent].filter(Boolean).join('\n\n---\n\n');
+
+  return { content: merged, contentHash: hashContent(merged) };
 }
 
 async function acceptCommonCookieBanners(page: Awaited<ReturnType<BrowserContext['newPage']>>) {
@@ -242,7 +349,31 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
   const context = await createContext(browser, targetUrl, config);
   const page = await context.newPage();
   const unsafeRequestCache = new Map<string, boolean>();
+  const capturedApiResponses: CapturedApiResponse[] = [];
   let blockedSubresourceCount = 0;
+
+  page.on('response', async response => {
+    if (!config.apiCapture?.enabled) return;
+    if (capturedApiResponses.length >= (config.apiCapture.maxResponses ?? 10)) return;
+
+    const responseUrl = response.url();
+    const contentType = response.headers()['content-type'] || '';
+    if (!shouldCaptureApiResponse(responseUrl, contentType, config)) return;
+
+    try {
+      await assertSafeScrapeUrl(responseUrl, 'API response URL');
+      const text = await response.text();
+      if (text.length > 250_000) return;
+      capturedApiResponses.push({
+        url: responseUrl,
+        status: response.status(),
+        contentType,
+        body: JSON.parse(text),
+      });
+    } catch {
+      // API capture is opportunistic; regular page extraction should still continue.
+    }
+  });
 
   await page.route('**/*', async route => {
     const requestUrl = route.request().url();
@@ -313,6 +444,11 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
       await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
     }
 
+    for (const text of config.behavior?.clickText || []) {
+      await page.getByText(text, { exact: false }).first().click({ timeout: 5000 });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+    }
+
     if (config.behavior?.scrollToBottom) {
       await scrollToBottom(page);
     }
@@ -327,8 +463,22 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
       throw new CrawlError('No extractable text content was found', 'empty_content', CrawlStatus.FAILED);
     }
 
+    const apiContent = capturedApiToMarkdown(capturedApiResponses);
+    let merged = mergeExtractedContent(extracted.content, apiContent, config.apiCapture?.mode);
+    let extractionMethod = apiContent ? `${extracted.extractionMethod}+api` : extracted.extractionMethod;
+
+    if (config.content?.screenshotDiff) {
+      const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
+      if (screenshot) {
+        const visualFingerprint = `# Visual fingerprint\n\nScreenshot SHA-256: ${crypto.createHash('sha256').update(screenshot).digest('hex')}`;
+        merged = mergeExtractedContent(merged.content, visualFingerprint, 'append');
+        extractionMethod = `${extractionMethod}+screenshot`;
+      }
+    }
+
     return {
-      ...extracted,
+      ...merged,
+      extractionMethod,
       finalUrl,
       httpStatus: status,
       contentType,
@@ -343,13 +493,18 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
 export const scrapeTarget = async (
   rawUrl: string,
   crawlerConfig?: ICrawlerConfig,
-  crawlerAuthEncrypted?: string
+  crawlerAuthEncrypted?: string,
+  scrapeContext: ScrapeContext = {}
 ): Promise<ScrapeResult> => {
   const targetUrl = await assertSafeScrapeUrl(rawUrl);
-  const config = hydrateCrawlerConfig(crawlerConfig, crawlerAuthEncrypted);
+  const config = await hydrateCrawlerConfig(crawlerConfig, crawlerAuthEncrypted, scrapeContext);
   let hostDelayMs = env.CRAWLER_MIN_HOST_DELAY_MS;
 
-  if (config.respectRobots ?? true) {
+  const shouldRespectRobots = config.compliance?.robotsPolicy === 'ignore'
+    ? false
+    : config.respectRobots ?? true;
+
+  if (shouldRespectRobots) {
     const robots = await assertRobotsAllowed(targetUrl.href);
     hostDelayMs = Math.max(hostDelayMs, robots?.crawlDelayMs || 0);
   }

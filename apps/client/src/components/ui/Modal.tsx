@@ -38,7 +38,7 @@ export function Modal({ isOpen, onClose, title, description, children }: ModalPr
       />
       <div 
         ref={modalRef}
-        className="relative z-50 w-full max-w-lg overflow-hidden rounded-2xl bg-white dark:bg-gray-900 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+        className="relative z-50 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white dark:bg-gray-900 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
       >
         <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-6 py-4">
           <div>
@@ -52,7 +52,7 @@ export function Modal({ isOpen, onClose, title, description, children }: ModalPr
             <X size={20} />
           </button>
         </div>
-        <div className="px-6 py-4">
+        <div className="overflow-y-auto px-6 py-4">
           {children}
         </div>
       </div>

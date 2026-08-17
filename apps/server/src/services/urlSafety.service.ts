@@ -28,6 +28,21 @@ function isBlockedHostname(hostname: string) {
   return BLOCKED_HOSTNAMES.has(normalized) || normalized.endsWith('.localhost');
 }
 
+function isAllowlistedPrivateHost(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, '');
+  return (env.CRAWLER_PRIVATE_NETWORK_ALLOWLIST || '')
+    .split(',')
+    .map(entry => entry.trim().toLowerCase())
+    .filter(Boolean)
+    .some(entry => {
+      if (entry.startsWith('*.')) {
+        const suffix = entry.slice(1);
+        return normalized.endsWith(suffix);
+      }
+      return normalized === entry;
+    });
+}
+
 export function isPrivateAddress(address: string): boolean {
   try {
     const parsed = ipaddr.parse(address);
@@ -81,7 +96,7 @@ export async function assertSafeScrapeUrl(rawUrl: string, label = 'URL'): Promis
     throw new UrlSafetyError(`${label} points to a blocked metadata endpoint`);
   }
 
-  if (!env.CRAWLER_ALLOW_PRIVATE_NETWORKS) {
+  if (!env.CRAWLER_ALLOW_PRIVATE_NETWORKS && !isAllowlistedPrivateHost(parsed.hostname)) {
     const addresses = await resolveHostname(parsed.hostname);
     const unsafeAddress = addresses.find(isPrivateAddress);
 

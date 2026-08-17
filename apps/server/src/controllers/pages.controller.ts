@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { MonitoredPage } from '../models/MonitoredPage';
+import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
 import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
 import { Workspace } from '../models/Workspace';
@@ -8,6 +9,7 @@ import { ForbiddenError } from '@casl/ability';
 import { logAuditEvent } from '../services/audit.service';
 import { encryptSecret } from '../services/security.service';
 import { assertSafeScrapeUrl } from '../services/urlSafety.service';
+import { discoverSite as discoverSiteUrls } from '../services/siteDiscovery.service';
 
 const splitCrawlerConfig = (crawlerConfig: any) => {
   if (!crawlerConfig) {
@@ -104,6 +106,51 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
     });
 
     await page.save();
+
+    const discoveredPages = [];
+    if (publicCrawlerConfig?.discovery?.enabled) {
+      const discoveredUrls = await discoverSiteUrls(url, {
+        maxDepth: publicCrawlerConfig.discovery.maxDepth,
+        maxPages: publicCrawlerConfig.discovery.maxPages,
+        includeSubdomains: publicCrawlerConfig.discovery.includeSubdomains,
+        includeSitemaps: publicCrawlerConfig.discovery.includeSitemaps,
+        respectRobots: publicCrawlerConfig.compliance?.robotsPolicy === 'ignore'
+          ? false
+          : publicCrawlerConfig.respectRobots ?? true,
+      });
+      const existingUrls = new Set(
+        (await MonitoredPage.find({ workspaceId }).select('url')).map(existingPage => existingPage.url)
+      );
+      let remainingSlots = Math.max(0, (workspace?.maxPages ?? Number.MAX_SAFE_INTEGER) - existingUrls.size);
+
+      for (const discovered of discoveredUrls) {
+        if (remainingSlots <= 0) break;
+        if (existingUrls.has(discovered.url)) continue;
+
+        const discoveredUrl = new URL(discovered.url);
+        const discoveredPage = await MonitoredPage.create({
+          userId,
+          workspaceId,
+          url: discovered.url,
+          title: `${title} ${discoveredUrl.pathname === '/' ? 'Home' : discoveredUrl.pathname}`,
+          category,
+          importance,
+          checkInterval,
+          crawlerConfig: {
+            ...publicCrawlerConfig,
+            discovery: {
+              ...publicCrawlerConfig.discovery,
+              enabled: false,
+            },
+          },
+          crawlerAuthEncrypted,
+          status: PageStatus.ACTIVE,
+        });
+        discoveredPages.push(discoveredPage);
+        existingUrls.add(discovered.url);
+        remainingSlots -= 1;
+      }
+    }
     
     // Log Audit Event
     await logAuditEvent({
@@ -115,7 +162,128 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       req
     });
 
-    res.status(201).json(page);
+    res.status(201).json(discoveredPages.length ? { page, discoveredPages } : page);
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const discoverSite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('create', 'MonitoredPage');
+
+    const urls = await discoverSiteUrls(req.body.url, {
+      maxDepth: req.body.maxDepth,
+      maxPages: req.body.maxPages,
+      includeSubdomains: req.body.includeSubdomains,
+      includeSitemaps: req.body.includeSitemaps,
+      respectRobots: req.body.respectRobots,
+    });
+
+    res.json({ urls, count: urls.length });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const getCrawlerAuthSessions = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+
+    const sessions = await CrawlerAuthSession.find({ workspaceId })
+      .sort({ updatedAt: -1 })
+      .select('-storageStateEncrypted');
+
+    res.json(sessions);
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const createCrawlerAuthSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user!.userId;
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('create', 'MonitoredPage');
+
+    const originUrl = await assertSafeScrapeUrl(req.body.origin);
+    const session = await CrawlerAuthSession.create({
+      userId,
+      workspaceId,
+      name: req.body.name,
+      origin: originUrl.origin,
+      storageStateEncrypted: encryptSecret(JSON.stringify(req.body.storageState)),
+    });
+
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: userId,
+      action: 'crawler_auth_session.created',
+      resourceId: session.id,
+      metadata: { origin: originUrl.origin, name: req.body.name },
+      req
+    });
+
+    res.status(201).json({
+      _id: session.id,
+      userId: session.userId,
+      workspaceId: session.workspaceId,
+      name: session.name,
+      origin: session.origin,
+      lastUsedAt: session.lastUsedAt,
+      createdAt: (session as any).createdAt,
+      updatedAt: (session as any).updatedAt,
+    });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const deleteCrawlerAuthSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('delete', 'MonitoredPage');
+
+    const session = await CrawlerAuthSession.findOneAndDelete({ _id: req.params.sessionId, workspaceId });
+    if (!session) {
+      return res.status(404).json({ error: 'Crawler auth session not found' });
+    }
+
+    res.json({ message: 'Crawler auth session deleted successfully' });
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
