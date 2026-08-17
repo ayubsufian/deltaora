@@ -18,6 +18,21 @@ export const loginSchema = z.object({
 
 const selectorSchema = z.string().min(1).max(240);
 const urlPatternSchema = z.string().min(1).max(500);
+const recipeTimeoutSchema = z.number().int().min(100).max(60000).optional();
+const recipeStepSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('waitForSelector'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('click'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('clickText'), text: z.string().min(1).max(120), timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('fill'), selector: selectorSchema, value: z.string().max(5000), timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('selectOption'), selector: selectorSchema, value: z.string().max(500), timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('check'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('uncheck'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('press'), selector: selectorSchema, key: z.string().min(1).max(80), timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('hover'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('waitForURL'), pattern: urlPatternSchema, timeoutMs: recipeTimeoutSchema }).strict(),
+  z.object({ action: z.literal('waitMs'), value: z.number().int().min(0).max(15000) }).strict(),
+  z.object({ action: z.literal('scrollToBottom') }).strict(),
+]);
 
 const crawlerCookieSchema = z.object({
   name: z.string().min(1).max(200),
@@ -55,11 +70,18 @@ export const crawlerConfigSchema = z.object({
     waitForSelector: selectorSchema.optional(),
     clickSelectors: z.array(selectorSchema).max(20).optional(),
     clickText: z.array(z.string().min(1).max(120)).max(20).optional(),
+    steps: z.array(recipeStepSchema).max(50).optional(),
     scrollToBottom: z.boolean().optional(),
     acceptCookieBanners: z.boolean().optional(),
     waitAfterLoadMs: z.number().int().min(0).max(15000).optional(),
     locale: z.string().min(2).max(35).optional(),
     timezoneId: z.string().min(1).max(80).optional(),
+  }).strict().optional(),
+  pagination: z.object({
+    nextSelector: selectorSchema.optional(),
+    nextText: z.string().min(1).max(120).optional(),
+    maxPages: z.number().int().min(1).max(50).optional(),
+    waitForSelector: selectorSchema.optional(),
   }).strict().optional(),
   apiCapture: z.object({
     enabled: z.boolean().optional(),

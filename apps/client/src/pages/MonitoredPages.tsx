@@ -71,6 +71,12 @@ export function MonitoredPages() {
     waitForSelector: '',
     clickSelectors: '',
     clickText: '',
+    recipeSteps: '',
+    customHeaders: '',
+    paginationNextSelector: '',
+    paginationNextText: '',
+    paginationMaxPages: 1,
+    paginationWaitForSelector: '',
     scrollToBottom: false,
     locale: 'en-US',
     timezoneId: 'America/New_York',
@@ -131,6 +137,8 @@ export function MonitoredPages() {
     const clickText = splitList(crawlerOptions.clickText);
     const apiIncludePatterns = splitList(crawlerOptions.apiIncludePatterns);
     const apiExcludePatterns = splitList(crawlerOptions.apiExcludePatterns);
+    const recipeSteps = safeJson(crawlerOptions.recipeSteps);
+    const customHeaders = safeJson(crawlerOptions.customHeaders);
 
     return {
       authSessionId: crawlerOptions.authSessionId || undefined,
@@ -150,11 +158,18 @@ export function MonitoredPages() {
         waitForSelector: crawlerOptions.waitForSelector || undefined,
         clickSelectors: clickSelectors.length ? clickSelectors : undefined,
         clickText: clickText.length ? clickText : undefined,
+        steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
         scrollToBottom: crawlerOptions.scrollToBottom,
         acceptCookieBanners: true,
         locale: crawlerOptions.locale || undefined,
         timezoneId: crawlerOptions.timezoneId || undefined,
       },
+      pagination: crawlerOptions.paginationMaxPages > 1 ? {
+        nextSelector: crawlerOptions.paginationNextSelector || undefined,
+        nextText: crawlerOptions.paginationNextText || undefined,
+        maxPages: crawlerOptions.paginationMaxPages,
+        waitForSelector: crawlerOptions.paginationWaitForSelector || undefined,
+      } : undefined,
       apiCapture: crawlerOptions.apiCapture ? {
         enabled: true,
         mode: crawlerOptions.apiMode,
@@ -170,6 +185,9 @@ export function MonitoredPages() {
         robotsPolicy: crawlerOptions.respectRobots ? 'respect' : 'ignore',
         blockedHandling: crawlerOptions.blockedHandling,
       },
+      auth: customHeaders && typeof customHeaders === 'object' && !Array.isArray(customHeaders)
+        ? { headers: customHeaders }
+        : undefined,
     };
   };
 
@@ -536,6 +554,30 @@ export function MonitoredPages() {
                   placeholder="Load more, Pricing"
                 />
                 <Input
+                  label="Next selector"
+                  value={crawlerOptions.paginationNextSelector}
+                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextSelector: e.target.value }))}
+                  placeholder="a.next"
+                />
+                <Input
+                  label="Next text"
+                  value={crawlerOptions.paginationNextText}
+                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextText: e.target.value }))}
+                  placeholder="Next"
+                />
+                <Input
+                  label="Pagination pages"
+                  type="number"
+                  value={crawlerOptions.paginationMaxPages}
+                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationMaxPages: Number(e.target.value) }))}
+                />
+                <Input
+                  label="Pagination wait"
+                  value={crawlerOptions.paginationWaitForSelector}
+                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationWaitForSelector: e.target.value }))}
+                  placeholder=".results"
+                />
+                <Input
                   label="Locale"
                   value={crawlerOptions.locale}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, locale: e.target.value }))}
@@ -545,6 +587,31 @@ export function MonitoredPages() {
                   value={crawlerOptions.timezoneId}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, timezoneId: e.target.value }))}
                 />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Recipe steps JSON
+                  </label>
+                  <textarea
+                    className="min-h-28 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+                    value={crawlerOptions.recipeSteps}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, recipeSteps: e.target.value }))}
+                    placeholder='[{"action":"fill","selector":"#search","value":"pricing"},{"action":"press","selector":"#search","key":"Enter"}]'
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Headers JSON
+                  </label>
+                  <textarea
+                    className="min-h-28 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+                    value={crawlerOptions.customHeaders}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, customHeaders: e.target.value }))}
+                    placeholder='{"Authorization":"Bearer token"}'
+                  />
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">

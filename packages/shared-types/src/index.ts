@@ -94,6 +94,20 @@ export interface ICrawlerAuthConfig {
   storageState?: Record<string, unknown>;
 }
 
+export type ICrawlerRecipeStep =
+  | { action: 'waitForSelector'; selector: string; timeoutMs?: number }
+  | { action: 'click'; selector: string; timeoutMs?: number }
+  | { action: 'clickText'; text: string; timeoutMs?: number }
+  | { action: 'fill'; selector: string; value: string; timeoutMs?: number }
+  | { action: 'selectOption'; selector: string; value: string; timeoutMs?: number }
+  | { action: 'check'; selector: string; timeoutMs?: number }
+  | { action: 'uncheck'; selector: string; timeoutMs?: number }
+  | { action: 'press'; selector: string; key: string; timeoutMs?: number }
+  | { action: 'hover'; selector: string; timeoutMs?: number }
+  | { action: 'waitForURL'; pattern: string; timeoutMs?: number }
+  | { action: 'waitMs'; value: number }
+  | { action: 'scrollToBottom' };
+
 export interface ICrawlerConfig {
   authSessionId?: string;
   respectRobots?: boolean;
@@ -113,11 +127,18 @@ export interface ICrawlerConfig {
     waitForSelector?: string;
     clickSelectors?: string[];
     clickText?: string[];
+    steps?: ICrawlerRecipeStep[];
     scrollToBottom?: boolean;
     acceptCookieBanners?: boolean;
     waitAfterLoadMs?: number;
     locale?: string;
     timezoneId?: string;
+  };
+  pagination?: {
+    nextSelector?: string;
+    nextText?: string;
+    maxPages?: number;
+    waitForSelector?: string;
   };
   apiCapture?: {
     enabled?: boolean;

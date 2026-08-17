@@ -39,18 +39,35 @@ function extractSitemapUrls(xml: string) {
 }
 
 async function loadSitemapUrls(root: URL, options: Required<SiteDiscoveryOptions>) {
-  const sitemapUrls = [
+  const sitemapQueue = [
     new URL('/sitemap.xml', root.origin).href,
     new URL('/sitemap_index.xml', root.origin).href,
   ];
+  const seenSitemaps = new Set<string>();
   const discovered: string[] = [];
 
-  for (const sitemapUrl of sitemapUrls) {
+  while (sitemapQueue.length && discovered.length < options.maxPages) {
+    const sitemapUrl = sitemapQueue.shift()!;
+    if (seenSitemaps.has(sitemapUrl)) continue;
+    seenSitemaps.add(sitemapUrl);
+
     try {
       const response = await fetchBufferSafely(sitemapUrl, { maxBytes: 2_000_000 });
       if (response.status >= 400) continue;
-      discovered.push(...extractSitemapUrls(response.buffer.toString('utf8')));
-      if (discovered.length >= options.maxPages) break;
+      const body = response.buffer.toString('utf8');
+      const urls = extractSitemapUrls(body);
+
+      for (const rawUrl of urls) {
+        const candidate = new URL(rawUrl, sitemapUrl);
+        if (!isSameSite(candidate, root, options.includeSubdomains)) continue;
+
+        if (candidate.pathname.toLowerCase().endsWith('.xml') && seenSitemaps.size < 100) {
+          sitemapQueue.push(normalizeUrl(candidate.href));
+        } else {
+          discovered.push(normalizeUrl(candidate.href));
+          if (discovered.length >= options.maxPages) break;
+        }
+      }
     } catch {
       // Sitemaps are optional discovery hints.
     }

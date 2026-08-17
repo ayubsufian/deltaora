@@ -1,6 +1,6 @@
-import { chromium, Browser, BrowserContext, BrowserContextOptions } from 'playwright';
+import { chromium, Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import crypto from 'crypto';
-import { CrawlStatus, ICrawlerAuthConfig, ICrawlerConfig } from '@deltaora/shared-types';
+import { CrawlStatus, ICrawlerAuthConfig, ICrawlerConfig, ICrawlerRecipeStep } from '@deltaora/shared-types';
 import { env } from '../config/env';
 import { decryptSecret } from './security.service';
 import { assertRobotsAllowed } from './robots.service';
@@ -311,6 +311,121 @@ async function scrollToBottom(page: Awaited<ReturnType<BrowserContext['newPage']
   }
 }
 
+function recipeTimeout(timeoutMs?: number) {
+  return timeoutMs ?? 10_000;
+}
+
+function urlPattern(pattern: string) {
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return pattern;
+  }
+}
+
+async function executeRecipeStep(page: Page, step: ICrawlerRecipeStep) {
+  switch (step.action) {
+    case 'waitForSelector':
+      await page.waitForSelector(step.selector, { timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'click':
+      await page.locator(step.selector).first().click({ timeout: recipeTimeout(step.timeoutMs) });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+      break;
+    case 'clickText':
+      await page.getByText(step.text, { exact: false }).first().click({ timeout: recipeTimeout(step.timeoutMs) });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+      break;
+    case 'fill':
+      await page.locator(step.selector).first().fill(step.value, { timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'selectOption':
+      await page.locator(step.selector).first().selectOption(step.value, { timeout: recipeTimeout(step.timeoutMs) });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+      break;
+    case 'check':
+      await page.locator(step.selector).first().check({ timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'uncheck':
+      await page.locator(step.selector).first().uncheck({ timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'press':
+      await page.locator(step.selector).first().press(step.key, { timeout: recipeTimeout(step.timeoutMs) });
+      await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
+      break;
+    case 'hover':
+      await page.locator(step.selector).first().hover({ timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'waitForURL':
+      await page.waitForURL(urlPattern(step.pattern), { timeout: recipeTimeout(step.timeoutMs) });
+      break;
+    case 'waitMs':
+      await page.waitForTimeout(step.value);
+      break;
+    case 'scrollToBottom':
+      await scrollToBottom(page);
+      break;
+  }
+}
+
+async function executeRecipeSteps(page: Page, steps: ICrawlerRecipeStep[] = []) {
+  for (const step of steps) {
+    await executeRecipeStep(page, step);
+  }
+}
+
+async function extractCurrentPage(page: Page, config: InternalCrawlerConfig, label?: string) {
+  const currentUrl = page.url();
+  await assertSafeScrapeUrl(currentUrl, 'current URL');
+  const html = await page.content();
+  const extracted = extractCleanText(html, currentUrl, config.extraction);
+
+  if (!extracted.content) return extracted;
+  if (!label) return extracted;
+
+  const content = `# ${label}\n\nURL: ${currentUrl}\n\n${extracted.content}`;
+  return {
+    content,
+    contentHash: hashContent(content),
+    extractionMethod: extracted.extractionMethod,
+  };
+}
+
+async function collectPaginatedContent(page: Page, config: InternalCrawlerConfig) {
+  const sections = [await extractCurrentPage(page, config, config.pagination ? 'Page 1' : undefined)];
+  const maxPages = config.pagination?.maxPages ?? 1;
+
+  for (let pageIndex = 2; pageIndex <= maxPages; pageIndex++) {
+    const nextSelector = config.pagination?.nextSelector;
+    const nextText = config.pagination?.nextText;
+    if (!nextSelector && !nextText) break;
+
+    const next = nextSelector
+      ? page.locator(nextSelector).first()
+      : page.getByText(nextText!, { exact: false }).first();
+
+    const isVisible = await next.isVisible({ timeout: 1500 }).catch(() => false);
+    const isDisabled = await next.isDisabled({ timeout: 1000 }).catch(() => false);
+    if (!isVisible || isDisabled) break;
+
+    await next.click({ timeout: 5000 });
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => undefined);
+    if (config.pagination?.waitForSelector) {
+      await page.waitForSelector(config.pagination.waitForSelector, { timeout: 10_000 });
+    }
+    await page.waitForTimeout(config.behavior?.waitAfterLoadMs ?? 1000);
+    await detectBlockedStates(page, Boolean(config.auth));
+    sections.push(await extractCurrentPage(page, config, `Page ${pageIndex}`));
+  }
+
+  const content = sections.map(section => section.content).filter(Boolean).join('\n\n---\n\n');
+  return {
+    content,
+    contentHash: hashContent(content),
+    extractionMethod: Array.from(new Set(sections.map(section => section.extractionMethod))).join('+') || 'html',
+  };
+}
+
 async function detectBlockedStates(page: Awaited<ReturnType<BrowserContext['newPage']>>, hasAuthConfig: boolean) {
   const captchaSelectors = [
     'iframe[src*="captcha"]',
@@ -449,6 +564,8 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
       await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => undefined);
     }
 
+    await executeRecipeSteps(page, config.behavior?.steps);
+
     if (config.behavior?.scrollToBottom) {
       await scrollToBottom(page);
     }
@@ -456,8 +573,7 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
     await page.waitForTimeout(config.behavior?.waitAfterLoadMs ?? 1500);
     await detectBlockedStates(page, Boolean(config.auth));
 
-    const html = await page.content();
-    const extracted = extractCleanText(html, finalUrl, config.extraction);
+    const extracted = await collectPaginatedContent(page, config);
 
     if (!extracted.content) {
       throw new CrawlError('No extractable text content was found', 'empty_content', CrawlStatus.FAILED);
@@ -479,7 +595,7 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
     return {
       ...merged,
       extractionMethod,
-      finalUrl,
+      finalUrl: page.url(),
       httpStatus: status,
       contentType,
       blockedSubresourceCount,
