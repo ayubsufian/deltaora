@@ -193,6 +193,7 @@ async function createContext(browser: Browser, targetUrl: string, config: Intern
     locale: config.behavior?.locale || 'en-US',
     timezoneId: config.behavior?.timezoneId || 'America/New_York',
     javaScriptEnabled: true,
+    serviceWorkers: 'block',
     ignoreHTTPSErrors: false,
     extraHTTPHeaders: {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',

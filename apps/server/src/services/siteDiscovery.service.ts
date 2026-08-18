@@ -8,13 +8,14 @@ export interface SiteDiscoveryOptions {
   maxPages?: number;
   includeSubdomains?: boolean;
   includeSitemaps?: boolean;
+  includeFeeds?: boolean;
   respectRobots?: boolean;
 }
 
 export interface DiscoveredUrl {
   url: string;
   depth: number;
-  source: 'seed' | 'sitemap' | 'link' | 'canonical';
+  source: 'seed' | 'sitemap' | 'link' | 'canonical' | 'feed';
 }
 
 function normalizeUrl(rawUrl: string) {
@@ -38,10 +39,31 @@ function extractSitemapUrls(xml: string) {
     .filter(Boolean);
 }
 
+function extractRobotsSitemaps(robotsTxt: string) {
+  return robotsTxt
+    .split(/\r?\n/)
+    .map(line => line.match(/^\s*sitemap\s*:\s*(\S+)\s*$/i)?.[1])
+    .filter((value): value is string => Boolean(value));
+}
+
+async function loadRobotsSitemapUrls(root: URL) {
+  try {
+    const response = await fetchBufferSafely(new URL('/robots.txt', root.origin).href, {
+      maxBytes: 512_000,
+      headers: { Accept: 'text/plain,*/*;q=0.8' },
+    });
+    if (response.status >= 400) return [];
+    return extractRobotsSitemaps(response.buffer.toString('utf8'));
+  } catch {
+    return [];
+  }
+}
+
 async function loadSitemapUrls(root: URL, options: Required<SiteDiscoveryOptions>) {
   const sitemapQueue = [
     new URL('/sitemap.xml', root.origin).href,
     new URL('/sitemap_index.xml', root.origin).href,
+    ...(await loadRobotsSitemapUrls(root)),
   ];
   const seenSitemaps = new Set<string>();
   const discovered: string[] = [];
@@ -104,6 +126,29 @@ function extractLinks(html: string, pageUrl: string, root: URL, includeSubdomain
   return Array.from(urls);
 }
 
+function extractFeeds(html: string, pageUrl: string, root: URL, includeSubdomains: boolean) {
+  const dom = new JSDOM(html, { url: pageUrl });
+  const document = dom.window.document;
+  const urls = new Set<string>();
+
+  document
+    .querySelectorAll<HTMLLinkElement>('link[rel~="alternate"][type*="rss"], link[rel~="alternate"][type*="atom"], a[href$=".rss"], a[href$=".atom"]')
+    .forEach(link => {
+      try {
+        const href = link.href || link.getAttribute('href') || '';
+        const candidate = new URL(href, pageUrl);
+        if (isSameSite(candidate, root, includeSubdomains)) {
+          urls.add(normalizeUrl(candidate.href));
+        }
+      } catch {
+        // Ignore malformed feed links.
+      }
+    });
+
+  dom.window.close();
+  return Array.from(urls);
+}
+
 export async function discoverSite(rawUrl: string, options: SiteDiscoveryOptions = {}) {
   const root = await assertSafeScrapeUrl(rawUrl);
   const resolvedOptions: Required<SiteDiscoveryOptions> = {
@@ -111,6 +156,7 @@ export async function discoverSite(rawUrl: string, options: SiteDiscoveryOptions
     maxPages: options.maxPages ?? 100,
     includeSubdomains: options.includeSubdomains ?? false,
     includeSitemaps: options.includeSitemaps ?? true,
+    includeFeeds: options.includeFeeds ?? true,
     respectRobots: options.respectRobots ?? true,
   };
 
@@ -152,8 +198,17 @@ export async function discoverSite(rawUrl: string, options: SiteDiscoveryOptions
     try {
       const response = await fetchBufferSafely(currentUrl.href, { maxBytes: 2_000_000 });
       if (response.status >= 400 || !response.contentType.toLowerCase().includes('html')) continue;
+      const html = response.buffer.toString('utf8');
 
-      for (const nextUrl of extractLinks(response.buffer.toString('utf8'), response.finalUrl, root, resolvedOptions.includeSubdomains)) {
+      if (resolvedOptions.includeFeeds) {
+        for (const feedUrl of extractFeeds(html, response.finalUrl, root, resolvedOptions.includeSubdomains)) {
+          if (!seen.has(feedUrl)) {
+            queue.push({ url: feedUrl, depth: current.depth + 1, source: 'feed' });
+          }
+        }
+      }
+
+      for (const nextUrl of extractLinks(html, response.finalUrl, root, resolvedOptions.includeSubdomains)) {
         if (!seen.has(nextUrl)) {
           queue.push({ url: nextUrl, depth: current.depth + 1, source: 'link' });
         }

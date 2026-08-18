@@ -114,6 +114,7 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
         maxPages: publicCrawlerConfig.discovery.maxPages,
         includeSubdomains: publicCrawlerConfig.discovery.includeSubdomains,
         includeSitemaps: publicCrawlerConfig.discovery.includeSitemaps,
+        includeFeeds: publicCrawlerConfig.discovery.includeFeeds,
         respectRobots: publicCrawlerConfig.compliance?.robotsPolicy === 'ignore'
           ? false
           : publicCrawlerConfig.respectRobots ?? true,
@@ -186,6 +187,7 @@ export const discoverSite = async (req: Request, res: Response, next: NextFuncti
       maxPages: req.body.maxPages,
       includeSubdomains: req.body.includeSubdomains,
       includeSitemaps: req.body.includeSitemaps,
+      includeFeeds: req.body.includeFeeds,
       respectRobots: req.body.respectRobots,
     });
 

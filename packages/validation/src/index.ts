@@ -60,6 +60,7 @@ export const crawlerConfigSchema = z.object({
     maxPages: z.number().int().min(1).max(500).optional(),
     includeSubdomains: z.boolean().optional(),
     includeSitemaps: z.boolean().optional(),
+    includeFeeds: z.boolean().optional(),
     followCanonical: z.boolean().optional(),
   }).strict().optional(),
   extraction: z.object({
@@ -107,6 +108,7 @@ export const discoverSiteSchema = z.object({
   maxPages: z.number().int().min(1).max(500).default(100),
   includeSubdomains: z.boolean().default(false),
   includeSitemaps: z.boolean().default(true),
+  includeFeeds: z.boolean().default(true),
   respectRobots: z.boolean().default(true),
 });
 

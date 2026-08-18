@@ -285,6 +285,42 @@ function extractTextTags(xml: string): string[] {
     .filter(Boolean);
 }
 
+function tagValue(xml: string, tag: string): string {
+  const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match ? decodeXmlText(match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').trim()) : '';
+}
+
+function attrValue(xml: string, tag: string, attr: string): string {
+  const match = xml.match(new RegExp(`<${tag}\\b[^>]*\\s${attr}=["']([^"']+)["'][^>]*>`, 'i'));
+  return match ? decodeXmlText(match[1].trim()) : '';
+}
+
+function feedToMarkdown(xml: string): string {
+  const isAtom = /<feed\b/i.test(xml);
+  const feedTitle = tagValue(xml, 'title') || 'Feed';
+  const entries = isAtom
+    ? Array.from(xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)).map(match => match[0])
+    : Array.from(xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)).map(match => match[0]);
+
+  const rows = entries.slice(0, 500).map((entry, index) => {
+    const title = tagValue(entry, 'title') || `Entry ${index + 1}`;
+    const link = isAtom
+      ? attrValue(entry, 'link', 'href') || tagValue(entry, 'link')
+      : tagValue(entry, 'link');
+    const date = tagValue(entry, 'updated') || tagValue(entry, 'published') || tagValue(entry, 'pubDate') || tagValue(entry, 'dc:date');
+    const summary = tagValue(entry, 'summary') || tagValue(entry, 'description') || tagValue(entry, 'content') || tagValue(entry, 'content:encoded');
+
+    return [
+      `## ${title}`,
+      link ? `Link: ${link}` : '',
+      date ? `Date: ${date}` : '',
+      summary ? `\n${summary}` : '',
+    ].filter(Boolean).join('\n');
+  });
+
+  return [`# ${feedTitle}`, ...rows].join('\n\n');
+}
+
 async function extractZipXmlText(buffer: Buffer, folderPrefix: string): Promise<string> {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(buffer);
@@ -369,6 +405,15 @@ export async function extractFromBuffer(buffer: Buffer, contentType: string, url
     } catch {
       return { ...normalizeStructuredText(text), extractionMethod: 'json' };
     }
+  }
+
+  if (
+    normalizedType === 'application/rss+xml' ||
+    normalizedType === 'application/atom+xml' ||
+    pathname.endsWith('.rss') ||
+    pathname.endsWith('.atom')
+  ) {
+    return { ...normalizeStructuredText(feedToMarkdown(bufferToText(buffer))), extractionMethod: 'feed' };
   }
 
   if (

@@ -23,7 +23,7 @@ export async function fetchBufferSafely(
       redirect: 'manual',
       headers: {
         'User-Agent': env.CRAWLER_USER_AGENT,
-        'Accept': method === 'HEAD' ? '*/*' : 'text/html,application/xhtml+xml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/json,image/*,audio/*,video/*,*/*;q=0.8',
+        'Accept': method === 'HEAD' ? '*/*' : 'text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,application/json,image/*,audio/*,video/*,*/*;q=0.8',
         ...options.headers,
       },
       signal: AbortSignal.timeout(30_000),

@@ -117,6 +117,7 @@ export interface ICrawlerConfig {
     maxPages?: number;
     includeSubdomains?: boolean;
     includeSitemaps?: boolean;
+    includeFeeds?: boolean;
     followCanonical?: boolean;
   };
   extraction?: {

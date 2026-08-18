@@ -90,6 +90,7 @@ export function MonitoredPages() {
     discoveryMaxPages: 25,
     includeSubdomains: false,
     includeSitemaps: true,
+    includeFeeds: true,
     respectRobots: true,
     blockedHandling: 'manual_review',
   });
@@ -149,6 +150,7 @@ export function MonitoredPages() {
         maxPages: crawlerOptions.discoveryMaxPages,
         includeSubdomains: crawlerOptions.includeSubdomains,
         includeSitemaps: crawlerOptions.includeSitemaps,
+        includeFeeds: crawlerOptions.includeFeeds,
       },
       extraction: includeSelectors.length || excludeSelectors.length ? {
         includeSelectors: includeSelectors.length ? includeSelectors : undefined,
@@ -237,6 +239,7 @@ export function MonitoredPages() {
         maxPages: crawlerOptions.discoveryMaxPages,
         includeSubdomains: crawlerOptions.includeSubdomains,
         includeSitemaps: crawlerOptions.includeSitemaps,
+        includeFeeds: crawlerOptions.includeFeeds,
         respectRobots: crawlerOptions.respectRobots,
       });
       setDiscoveryPreview(result.urls);
@@ -678,6 +681,14 @@ export function MonitoredPages() {
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSitemaps: e.target.checked }))}
                   />
                   Sitemaps
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={crawlerOptions.includeFeeds}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, includeFeeds: e.target.checked }))}
+                  />
+                  Feeds
                 </label>
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input

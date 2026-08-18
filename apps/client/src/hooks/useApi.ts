@@ -113,6 +113,7 @@ export function useDiscoverSite() {
       maxPages?: number;
       includeSubdomains?: boolean;
       includeSitemaps?: boolean;
+      includeFeeds?: boolean;
       respectRobots?: boolean;
     }) => {
       const { data } = await api.post('/pages/discover', body);
