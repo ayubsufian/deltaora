@@ -94,7 +94,16 @@ export const getPreferences = async (req: Request, res: Response, next: NextFunc
 export const updatePreferences = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.userId;
-    const { marketing, notifications } = req.body;
+    const {
+      digestFrequency,
+      inApp,
+      marketing,
+      minimumImportance,
+      notifications,
+      quietHoursEnd,
+      quietHoursStart,
+      timezone,
+    } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -106,6 +115,24 @@ export const updatePreferences = async (req: Request, res: Response, next: NextF
     }
     if (typeof notifications === 'boolean') {
       user.emailPreferences.notifications = notifications;
+    }
+    if (typeof inApp === 'boolean') {
+      user.emailPreferences.inApp = inApp;
+    }
+    if (digestFrequency) {
+      user.emailPreferences.digestFrequency = digestFrequency;
+    }
+    if (minimumImportance) {
+      user.emailPreferences.minimumImportance = minimumImportance;
+    }
+    if (typeof quietHoursStart === 'string') {
+      user.emailPreferences.quietHoursStart = quietHoursStart || undefined;
+    }
+    if (typeof quietHoursEnd === 'string') {
+      user.emailPreferences.quietHoursEnd = quietHoursEnd || undefined;
+    }
+    if (typeof timezone === 'string') {
+      user.emailPreferences.timezone = timezone || undefined;
     }
 
     await user.save();
@@ -370,6 +397,42 @@ export const deletePasskey = async (req: Request, res: Response, next: NextFunct
     });
 
     res.json({ message: 'Passkey deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const renamePasskey = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { passkeyId } = req.params;
+    const credential = await PasskeyCredential.findOneAndUpdate(
+      {
+        _id: passkeyId,
+        userId: req.user!.userId,
+      },
+      { $set: { name: req.body.name } },
+      { new: true }
+    );
+
+    if (!credential) {
+      return res.status(404).json({ error: 'Passkey not found' });
+    }
+
+    await logAuthEvent('auth.passkey_renamed', {
+      actorId: req.user!.userId,
+      metadata: { credentialId: credential.credentialId },
+      req,
+    });
+
+    res.json({
+      id: credential.id,
+      name: credential.name,
+      deviceType: credential.deviceType,
+      backedUp: credential.backedUp,
+      transports: credential.transports,
+      lastUsedAt: credential.lastUsedAt,
+      createdAt: credential.createdAt,
+    });
   } catch (error) {
     next(error);
   }

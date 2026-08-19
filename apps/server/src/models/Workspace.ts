@@ -14,6 +14,16 @@ export interface IWorkspaceDocument extends Document {
   members: IWorkspaceMember[];
   plan: 'free' | 'pro' | 'enterprise';
   maxPages: number;
+  crawlerDefaults: {
+    respectRobots: boolean;
+    blockedHandling: 'fail' | 'manual_review';
+    apiCapture: boolean;
+    screenshotDiff: boolean;
+    includeFeeds: boolean;
+  };
+  notificationDefaults: {
+    minimumImportance: 'low' | 'medium' | 'high' | 'critical';
+  };
 }
 
 const WorkspaceMemberSchema = new Schema<IWorkspaceMember>(
@@ -32,6 +42,16 @@ const WorkspaceSchema = new Schema<IWorkspaceDocument>(
     members: { type: [WorkspaceMemberSchema], default: [] },
     plan: { type: String, enum: ['free', 'pro', 'enterprise'], default: 'free' },
     maxPages: { type: Number, default: 10 },
+    crawlerDefaults: {
+      respectRobots: { type: Boolean, default: true },
+      blockedHandling: { type: String, enum: ['fail', 'manual_review'], default: 'manual_review' },
+      apiCapture: { type: Boolean, default: false },
+      screenshotDiff: { type: Boolean, default: false },
+      includeFeeds: { type: Boolean, default: true },
+    },
+    notificationDefaults: {
+      minimumImportance: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+    },
   },
   { timestamps: true }
 );

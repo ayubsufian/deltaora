@@ -14,6 +14,12 @@ export interface IUserDocument extends Omit<IUser, '_id'>, Document {
   emailPreferences: {
     marketing: boolean;
     notifications: boolean;
+    inApp: boolean;
+    digestFrequency: 'instant' | 'daily' | 'weekly' | 'never';
+    minimumImportance: 'low' | 'medium' | 'high' | 'critical';
+    quietHoursStart?: string;
+    quietHoursEnd?: string;
+    timezone?: string;
   };
 }
 
@@ -36,6 +42,12 @@ const UserSchema = new Schema<IUserDocument>(
     emailPreferences: {
       marketing: { type: Boolean, default: false },
       notifications: { type: Boolean, default: true },
+      inApp: { type: Boolean, default: true },
+      digestFrequency: { type: String, enum: ['instant', 'daily', 'weekly', 'never'], default: 'instant' },
+      minimumImportance: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+      quietHoursStart: { type: String },
+      quietHoursEnd: { type: String },
+      timezone: { type: String },
     },
   },
   { timestamps: true }

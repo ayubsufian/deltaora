@@ -9,6 +9,7 @@ import {
   listPasskeys,
   listSessions,
   regenerateMfaRecoveryCodes,
+  renamePasskey,
   revokeOtherSessions,
   revokeSession,
   setUserStatus,
@@ -35,7 +36,20 @@ router.patch(
   updateProfile
 );
 router.get('/me/preferences', getPreferences);
-router.patch('/me/preferences', updatePreferences);
+router.patch(
+  '/me/preferences',
+  validate(z.object({
+    marketing: z.boolean().optional(),
+    notifications: z.boolean().optional(),
+    inApp: z.boolean().optional(),
+    digestFrequency: z.enum(['instant', 'daily', 'weekly', 'never']).optional(),
+    minimumImportance: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+    quietHoursStart: z.string().regex(/^$|^\d{2}:\d{2}$/).optional(),
+    quietHoursEnd: z.string().regex(/^$|^\d{2}:\d{2}$/).optional(),
+    timezone: z.string().max(80).optional(),
+  }).strict()),
+  updatePreferences
+);
 router.post(
   '/me/password',
   validate(z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(15).max(1024) })),
@@ -52,6 +66,12 @@ router.get('/me/sessions', listSessions);
 router.delete('/me/sessions/others', requireRecentStepUp(), revokeOtherSessions);
 router.delete('/me/sessions/:sessionId', requireRecentStepUp(), revokeSession);
 router.get('/me/passkeys', listPasskeys);
+router.patch(
+  '/me/passkeys/:passkeyId',
+  requireRecentStepUp(),
+  validate(z.object({ name: z.string().min(1).max(100) }).strict()),
+  renamePasskey
+);
 router.delete('/me/passkeys/:passkeyId', requireRecentStepUp(), deletePasskey);
 router.get('/me/export', exportAccountData);
 router.delete('/me', requireRecentStepUp(), deleteAccount);

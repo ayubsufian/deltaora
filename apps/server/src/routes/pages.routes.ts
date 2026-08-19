@@ -11,7 +11,7 @@ import {
   deletePage,
   togglePageStatus,
 } from '../controllers/pages.controller';
-import { requireAuth, requireVerifiedEmail } from '../middleware/auth';
+import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { createCrawlerAuthSessionSchema, createPageSchema, discoverSiteSchema, updatePageSchema } from '@deltaora/validation';
@@ -82,9 +82,9 @@ router.post('/discover', validate(discoverSiteSchema), discoverSite);
 
 router.get('/auth-sessions', getCrawlerAuthSessions);
 
-router.post('/auth-sessions', validate(createCrawlerAuthSessionSchema), createCrawlerAuthSession);
+router.post('/auth-sessions', requireRecentStepUp(), validate(createCrawlerAuthSessionSchema), createCrawlerAuthSession);
 
-router.delete('/auth-sessions/:sessionId', deleteCrawlerAuthSession);
+router.delete('/auth-sessions/:sessionId', requireRecentStepUp(), deleteCrawlerAuthSession);
 
 /**
  * @swagger
