@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bell, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 export function Header() {
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ export function Header() {
           />
         </form>
         <div className="flex items-center gap-x-4 lg:gap-x-6">
+          <ThemeToggle />
           <Link to="/notifications" className="relative p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors">
             <span className="sr-only">View notifications</span>
             <Bell className="h-6 w-6" aria-hidden="true" />

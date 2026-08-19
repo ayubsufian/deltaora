@@ -1,8 +1,11 @@
 import { Outlet } from 'react-router-dom';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 export function AuthLayout() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-linear-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 relative overflow-hidden">
+      <ThemeToggle className="absolute right-4 top-4 z-20 bg-white/70 dark:bg-gray-900/70" />
+
       {/* Abstract Background Shapes */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-500/10 dark:bg-blue-600/10 blur-[120px]" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-500/10 dark:bg-purple-600/10 blur-[120px]" />
