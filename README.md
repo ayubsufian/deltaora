@@ -4,10 +4,10 @@ AI-Powered Website Change Monitoring & Intelligent Policy Tracking Platform.
 
 ## Architecture
 
-- **Frontend**: React 19, TypeScript, Vite, TanStack Query, Tailwind CSS 4
+- **Frontend**: React 18, TypeScript, Vite, TanStack Query, Tailwind CSS 4
 - **Backend**: Node.js, Express, TypeScript, BullMQ, Mongoose
 - **Database**: MongoDB (Data storage), Redis (Caching & Job Queues)
-- **AI**: Google Gemini 1.5 Flash (Change Summaries)
+- **AI**: Google Gemini 2.5 Flash (Change Summaries)
 - **Infrastructure**: Docker Compose, Nginx (API Gateway & Static Hosting)
 
 ## Getting Started

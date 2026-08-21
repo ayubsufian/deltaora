@@ -10,6 +10,8 @@ const NotificationSchema = new Schema<INotificationDocument>(
     summaryId: { type: String, required: true },
     type: { type: String, enum: Object.values(NotificationType), required: true },
     isRead: { type: Boolean, default: false },
+    title: { type: String },
+    message: { type: String },
   },
   { timestamps: true }
 );

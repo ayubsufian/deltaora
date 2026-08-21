@@ -2,9 +2,12 @@ import React from 'react';
 import { Bell, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { useDashboardStats } from '../../hooks/useApi';
 
 export function Header() {
   const navigate = useNavigate();
+  const { data: stats } = useDashboardStats();
+  const hasUnread = (stats?.latestNotifications ?? []).some((n: { isRead?: boolean }) => !n.isRead);
 
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -37,7 +40,7 @@ export function Header() {
           <Link to="/notifications" className="relative p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 transition-colors">
             <span className="sr-only">View notifications</span>
             <Bell className="h-6 w-6" aria-hidden="true" />
-            <span className="absolute top-1.5 right-1.5 block h-2.5 w-2.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-900" />
+            {hasUnread && <span className="absolute top-1.5 right-1.5 block h-2.5 w-2.5 rounded-full bg-blue-600 ring-2 ring-white dark:ring-gray-900" />}
           </Link>
         </div>
       </div>

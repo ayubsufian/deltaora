@@ -178,7 +178,8 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
         htmlContent: workspaceInviteEmail(
           inviter?.name || 'A team member',
           workspace?.name || 'a workspace',
-          joinUrl
+          joinUrl,
+          env.CLIENT_URL
         ),
       });
 

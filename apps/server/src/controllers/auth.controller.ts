@@ -75,7 +75,7 @@ const sendVerificationLink = async (user: any) => {
   await sendEmail({
     to: user.email,
     subject: 'Deltaora - Verify Your Email',
-    htmlContent: verificationEmail(verificationUrl),
+    htmlContent: verificationEmail(verificationUrl, env.CLIENT_URL),
   });
 };
 
@@ -441,7 +441,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
     await sendEmail({
       to: user.email,
       subject: 'Deltaora — Reset Your Password',
-      htmlContent: passwordResetEmail(resetUrl),
+      htmlContent: passwordResetEmail(resetUrl, env.CLIENT_URL),
     });
     await logAuthEvent('auth.password_reset_requested', { actorId: user.id, req });
 
@@ -590,7 +590,7 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
       sendEmail({
         to: email,
         subject: 'Welcome to Deltaora!',
-        htmlContent: welcomeEmail(user.name),
+        htmlContent: welcomeEmail(user.name, env.CLIENT_URL),
       }).catch(err => console.error('Failed to send welcome email:', err));
     } else {
       if (user.status !== 'active') {

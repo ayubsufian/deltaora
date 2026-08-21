@@ -2,11 +2,11 @@
  * 2026 Enterprise Email Templates for Deltaora.
  * Uses a unified, responsive base layout with branded styling.
  * All notification emails include an unsubscribe link per CAN-SPAM/GDPR.
+ *
+ * BASE_URL is injected from env.CLIENT_URL at each call site — never hardcoded.
  */
 
-const BASE_URL = 'http://localhost:5173';
-
-const baseLayout = (body: string, options?: { showUnsubscribe?: boolean }) => `
+const baseLayout = (body: string, baseUrl: string, options?: { showUnsubscribe?: boolean }) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -38,9 +38,9 @@ const baseLayout = (body: string, options?: { showUnsubscribe?: boolean }) => `
               <p style="margin: 0 0 8px; font-size: 12px; color: #9ca3af;">&copy; ${new Date().getFullYear()} Deltaora. All rights reserved.</p>
               ${options?.showUnsubscribe ? `
                 <p style="margin: 0; font-size: 12px; color: #9ca3af;">
-                  <a href="${BASE_URL}/settings" style="color: #6b7280; text-decoration: underline;">Manage email preferences</a>
+                  <a href="${baseUrl}/settings" style="color: #6b7280; text-decoration: underline;">Manage email preferences</a>
                   &nbsp;|&nbsp;
-                  <a href="${BASE_URL}/settings" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
+                  <a href="${baseUrl}/settings" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
                 </p>
               ` : ''}
             </td>
@@ -53,7 +53,7 @@ const baseLayout = (body: string, options?: { showUnsubscribe?: boolean }) => `
 </html>
 `;
 
-export const welcomeEmail = (name: string) => baseLayout(`
+export const welcomeEmail = (name: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Welcome to Deltaora, ${name}!</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     Your account has been successfully created. Deltaora helps you monitor web pages for changes with AI-powered analysis.
@@ -84,11 +84,11 @@ export const welcomeEmail = (name: string) => baseLayout(`
     </tr>
   </table>
   <div style="text-align: center;">
-    <a href="${BASE_URL}/dashboard" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Go to Dashboard</a>
+    <a href="${baseUrl}/dashboard" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Go to Dashboard</a>
   </div>
-`);
+`, baseUrl);
 
-export const passwordResetEmail = (resetUrl: string) => baseLayout(`
+export const passwordResetEmail = (resetUrl: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Password Reset Request</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     We received a request to reset the password for your Deltaora account.
@@ -108,9 +108,9 @@ export const passwordResetEmail = (resetUrl: string) => baseLayout(`
       </td>
     </tr>
   </table>
-`);
+`, baseUrl);
 
-export const workspaceInviteEmail = (inviterName: string, workspaceName: string, joinUrl: string) => baseLayout(`
+export const workspaceInviteEmail = (inviterName: string, workspaceName: string, joinUrl: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">You've Been Invited!</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     <strong>${inviterName}</strong> has invited you to join the workspace <strong>"${workspaceName}"</strong> on Deltaora.
@@ -124,9 +124,9 @@ export const workspaceInviteEmail = (inviterName: string, workspaceName: string,
   <p style="margin: 0; font-size: 13px; color: #9ca3af; text-align: center;">
     If you don't have a Deltaora account yet, you'll be prompted to create one first.
   </p>
-`);
+`, baseUrl);
 
-export const pageChangeNotificationEmail = (pageTitle: string, pageUrl: string, summaryText: string, pageId: string) => baseLayout(`
+export const pageChangeNotificationEmail = (pageTitle: string, pageUrl: string, summaryText: string, pageId: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Change Detected</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     We detected changes on a page you're monitoring:
@@ -141,11 +141,11 @@ export const pageChangeNotificationEmail = (pageTitle: string, pageUrl: string, 
     </tr>
   </table>
   <div style="text-align: center;">
-    <a href="${BASE_URL}/pages/${pageId}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">View Full Report</a>
+    <a href="${baseUrl}/pages/${pageId}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">View Full Report</a>
   </div>
-`, { showUnsubscribe: true });
+`, baseUrl, { showUnsubscribe: true });
 
-export const verificationEmail = (verificationUrl: string) => baseLayout(`
+export const verificationEmail = (verificationUrl: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Verify Your Email Address</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     Thank you for registering for Deltaora. To complete your signup and unlock all features, please verify your email address.
@@ -156,4 +156,4 @@ export const verificationEmail = (verificationUrl: string) => baseLayout(`
   <div style="text-align: center; margin-bottom: 24px;">
     <a href="${verificationUrl}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Verify Email</a>
   </div>
-`);
+`, baseUrl);

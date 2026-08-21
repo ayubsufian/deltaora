@@ -50,7 +50,7 @@ export interface IUser {
   name: string;
   email: string;
   passwordHash?: string; // Optional for OAuth users
-  role: string;
+  role: 'user' | 'admin';
   isEmailVerified: boolean;
   googleId?: string;
   createdAt: Date;
@@ -59,6 +59,7 @@ export interface IUser {
 export interface IMonitoredPage {
   _id: string;
   userId: string;
+  workspaceId: string;
   title: string;
   url: string;
   category: Category;
@@ -92,6 +93,13 @@ export interface ICrawlerAuthConfig {
   headers?: Record<string, string>;
   cookies?: ICrawlerCookie[];
   storageState?: Record<string, unknown>;
+  username?: string;
+  password?: string;
+  loginUrl?: string;
+  usernameSelector?: string;
+  passwordSelector?: string;
+  submitSelector?: string;
+  mfaSelector?: string;
 }
 
 export type ICrawlerRecipeStep =
@@ -156,6 +164,7 @@ export interface ICrawlerConfig {
     robotsPolicy?: 'respect' | 'ignore';
     blockedHandling?: 'fail' | 'manual_review';
   };
+  auth?: ICrawlerAuthConfig;
 }
 
 export interface ISnapshot {
@@ -194,6 +203,8 @@ export interface INotification {
   userId: string;
   pageId: string;
   summaryId: string;
+  title?: string;
+  message?: string;
   type: NotificationType;
   isRead: boolean;
   createdAt: Date;

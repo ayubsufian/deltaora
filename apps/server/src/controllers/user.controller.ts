@@ -35,7 +35,7 @@ const sendVerificationLink = async (user: any) => {
   await sendEmail({
     to: user.email,
     subject: 'Deltaora - Verify Your Email',
-    htmlContent: verificationEmail(`${env.CLIENT_URL}/verify-email?token=${token}`),
+    htmlContent: verificationEmail(`${env.CLIENT_URL}/verify-email?token=${token}`, env.CLIENT_URL),
   });
 };
 

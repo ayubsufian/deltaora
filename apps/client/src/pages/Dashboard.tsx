@@ -2,11 +2,12 @@ import { StatsCard } from '../components/dashboard/StatsCard';
 import { ChangeChart } from '../components/dashboard/ChangeChart';
 import { RecentActivity } from '../components/dashboard/RecentActivity';
 import { Globe, FileDiff, Sparkles, BellRing } from 'lucide-react';
-import { useDashboardStats } from '../hooks/useApi';
+import { useDashboardStats, useTimeseriesStats } from '../hooks/useApi';
 import { Spinner } from '../components/ui/Spinner';
 
 export function Dashboard() {
   const { data: stats, isLoading } = useDashboardStats();
+  const { data: timeseries } = useTimeseriesStats();
 
   if (isLoading) {
     return (
@@ -50,7 +51,7 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <ChangeChart />
+          <ChangeChart data={timeseries?.weekly} />
         </div>
         <div>
           <RecentActivity notifications={stats?.latestNotifications} />

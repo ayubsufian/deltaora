@@ -3,16 +3,19 @@ import { User } from '../models/User';
 import { NotificationType } from '@deltaora/shared-types';
 import { sendEmail } from './email.service';
 import { pageChangeNotificationEmail } from '../utils/emailTemplates';
+import { env } from '../config/env';
 
 export const createNotification = async (userId: string, pageId: string, summaryId: string, pageTitle: string, summaryText: string, pageUrl?: string) => {
   try {
-    // 1. Create In-App Notification (always)
+    // 1. Create In-App Notification with title and message for client display
     await Notification.create({
       userId,
       pageId,
       summaryId,
       type: NotificationType.IN_APP,
-      isRead: false
+      isRead: false,
+      title: `Change detected: ${pageTitle}`,
+      message: summaryText.length > 200 ? summaryText.substring(0, 200) + '...' : summaryText,
     });
 
     // 2. Send Email only if user has opted in (2026 GDPR/CAN-SPAM compliance)
@@ -21,11 +24,10 @@ export const createNotification = async (userId: string, pageId: string, summary
       await sendEmail({
         to: user.email,
         subject: `Deltaora Alert: Changes on ${pageTitle}`,
-        htmlContent: pageChangeNotificationEmail(pageTitle, pageUrl || '', summaryText, pageId),
+        htmlContent: pageChangeNotificationEmail(pageTitle, pageUrl || '', summaryText, pageId, env.CLIENT_URL),
       });
     }
   } catch (error) {
     console.error('Failed to create notification:', error);
   }
 };
-

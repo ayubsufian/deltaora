@@ -1,17 +1,11 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
 
-const data = [
-  { name: 'Mon', changes: 4 },
-  { name: 'Tue', changes: 7 },
-  { name: 'Wed', changes: 2 },
-  { name: 'Thu', changes: 9 },
-  { name: 'Fri', changes: 5 },
-  { name: 'Sat', changes: 1 },
-  { name: 'Sun', changes: 3 },
-];
+interface ChangeChartProps {
+  data?: Array<{ name: string; changes: number }>;
+}
 
-export function ChangeChart() {
+export function ChangeChart({ data = [] }: ChangeChartProps) {
   return (
     <Card>
       <CardHeader>

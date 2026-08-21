@@ -9,7 +9,7 @@ export const notificationWorker = new Worker('notificationQueue', async job => {
   const page = await MonitoredPage.findById(pageId);
   if (!page) throw new Error('Page not found');
 
-  await createNotification(page.userId, page.id, summaryId, page.title, summaryText);
+  await createNotification(page.userId, page.id, summaryId, page.title, summaryText, page.url);
 
 }, { connection: { url: env.REDIS_URL }, concurrency: 10 });
 

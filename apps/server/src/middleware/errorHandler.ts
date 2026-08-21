@@ -19,7 +19,11 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
   }
 
   const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+
+  // Suppress internal error details in production to prevent information disclosure
+  const message = statusCode >= 500 && process.env.NODE_ENV === 'production'
+    ? 'Internal Server Error'
+    : err.message || 'Internal Server Error';
 
   res.status(statusCode).json({ error: message });
 };

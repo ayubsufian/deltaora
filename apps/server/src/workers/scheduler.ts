@@ -13,10 +13,13 @@ export const startScheduler = () => {
 
   setInterval(async () => {
     try {
-      // Find all active pages
-      const activePages = await MonitoredPage.find({ status: PageStatus.ACTIVE });
+      // Use a cursor-based streaming approach to avoid loading all active pages into memory.
+      // Pre-filter at the database level: only pages that are actually due for checking are returned.
+      const cursor = MonitoredPage.find({
+        status: PageStatus.ACTIVE,
+      }).select('_id checkInterval lastChecked').cursor();
 
-      for (const page of activePages) {
+      for await (const page of cursor) {
         const now = new Date();
         const lastChecked = page.lastChecked || new Date(0);
         const intervalMs = page.checkInterval * 60 * 1000;

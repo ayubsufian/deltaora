@@ -15,44 +15,38 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
 
     ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
 
-    const cacheKey = `dashboard:${workspaceId}`;
-
-    // Try cache first
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      return res.json(JSON.parse(cached));
-    }
+    const statsCacheKey = `dashboard:stats:${workspaceId}`;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Run aggregations in parallel
-    const [
-      totalPages,
-      checkedToday,
-      totalChanges,
-      summariesGenerated,
-      latestNotifications
-    ] = await Promise.all([
-      MonitoredPage.countDocuments({ workspaceId }),
-      MonitoredPage.countDocuments({ workspaceId, lastChecked: { $gte: today } }),
-      Diff.countDocuments({ workspaceId }),
-      AISummary.countDocuments({ workspaceId }),
-      Notification.find({ userId: req.user!.userId }).sort({ createdAt: -1 }).limit(5)
-    ]);
+    // Try workspace-scoped stats from cache first
+    let workspaceStats: Record<string, unknown>;
+    const cachedStats = await redis.get(statsCacheKey);
 
-    const stats = {
-      totalPages,
-      checkedToday,
-      totalChanges,
-      summariesGenerated,
-      latestNotifications
-    };
+    if (cachedStats) {
+      workspaceStats = JSON.parse(cachedStats);
+    } else {
+      // Run workspace-scoped aggregations in parallel
+      const [totalPages, checkedToday, totalChanges, summariesGenerated] = await Promise.all([
+        MonitoredPage.countDocuments({ workspaceId }),
+        MonitoredPage.countDocuments({ workspaceId, lastChecked: { $gte: today } }),
+        Diff.countDocuments({ workspaceId }),
+        AISummary.countDocuments({ workspaceId }),
+      ]);
 
-    // Cache for 10 minutes
-    await redis.set(cacheKey, JSON.stringify(stats), 'EX', 600);
+      workspaceStats = { totalPages, checkedToday, totalChanges, summariesGenerated };
 
-    res.json(stats);
+      // Cache workspace stats for 10 minutes (safe — no user-specific data)
+      await redis.set(statsCacheKey, JSON.stringify(workspaceStats), 'EX', 600);
+    }
+
+    // User-specific notifications are NEVER cached under a shared workspace key
+    const latestNotifications = await Notification.find({ userId: req.user!.userId })
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    res.json({ ...workspaceStats, latestNotifications });
   } catch (error) {
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: 'Forbidden', message: error.message });

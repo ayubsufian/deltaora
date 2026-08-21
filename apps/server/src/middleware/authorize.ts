@@ -35,7 +35,7 @@ export const resolveAbility = async (req: Request, res: Response, next: NextFunc
 
     // Prefer route-bound workspace ids, then the active workspace header.
     const headerWorkspaceId = req.headers['x-workspace-id'] as string;
-    const requestedWorkspaceId = req.params?.id || req.params?.workspaceId;
+    const requestedWorkspaceId = req.params?.workspaceId;
 
     if (requestedWorkspaceId || headerWorkspaceId) {
       const workspace = await Workspace.findById(requestedWorkspaceId || headerWorkspaceId);

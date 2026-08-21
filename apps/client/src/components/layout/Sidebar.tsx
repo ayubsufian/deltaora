@@ -38,21 +38,23 @@ export function Sidebar() {
             <NavLink
               key={item.to}
               to={item.to}
-              className={({ isActive }) => `
-                group flex items-center rounded-md px-3 py-2.5 text-sm font-medium transition-colors
-                ${isActive 
-                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' 
-                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white'}
-              `}
             >
-              <item.icon
-                className={`mr-3 h-5 w-5 shrink-0 transition-colors ${
-                  window.location.pathname.startsWith(item.to)
-                    ? 'text-blue-700 dark:text-blue-400'
-                    : 'text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300'
-                }`}
-              />
-              {item.label}
+              {({ isActive }) => (
+                <div className={`group flex items-center rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                  isActive 
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' 
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white'
+                }`}>
+                  <item.icon
+                    className={`mr-3 h-5 w-5 shrink-0 transition-colors ${
+                      isActive
+                        ? 'text-blue-700 dark:text-blue-400'
+                        : 'text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300'
+                    }`}
+                  />
+                  {item.label}
+                </div>
+              )}
             </NavLink>
           ))}
         </nav>
