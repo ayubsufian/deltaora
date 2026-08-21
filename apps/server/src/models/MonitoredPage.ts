@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { IMonitoredPage, PageStatus, CrawlStatus, Category, Importance } from '@deltaora/shared-types';
 
-export interface IMonitoredPageDocument extends Omit<IMonitoredPage, '_id'>, Document {
+export interface IMonitoredPageDocument extends Omit<IMonitoredPage, '_id' | 'workspaceId'>, Document {
   workspaceId: mongoose.Types.ObjectId;
   crawlerAuthEncrypted?: string;
 }

@@ -9,8 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^3.23.8",
+    "@deltaora/config": "workspace:*",
     "@deltaora/shared-types": "workspace:*",
-    "@deltaora/config": "workspace:*"
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

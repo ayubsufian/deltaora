@@ -277,24 +277,43 @@ importers:
         specifier: ^5.5.3
         version: 5.9.3
 
-  packages/config: {}
+  packages/config:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
-  packages/shared-types: {}
+  packages/shared-types:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/shared-utils:
     dependencies:
       date-fns:
         specifier: ^3.6.0
         version: 3.6.0
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
   packages/validation:
     dependencies:
+      '@deltaora/config':
+        specifier: workspace:*
+        version: link:../config
       '@deltaora/shared-types':
         specifier: workspace:*
         version: link:../shared-types
       zod:
         specifier: ^3.23.8
         version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
 
 packages:
 
