@@ -26,7 +26,7 @@ app.use(cors({
   origin: env.CLIENT_URL,
   credentials: true,
 }));
-app.use(morgan('dev'));
+app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use('/api/v1', csrfProtection);
@@ -54,9 +54,35 @@ const startServer = async () => {
   await connectDB();
   initializeWorkers();
   
-  app.listen(env.PORT, () => {
+  const server = app.listen(env.PORT, () => {
     console.log(`Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
   });
+
+  // Graceful shutdown (2026 container orchestration standard)
+  const shutdown = async (signal: string) => {
+    console.log(`${signal} received. Graceful shutdown initiated...`);
+    server.close(() => {
+      console.log('HTTP server closed.');
+    });
+    try {
+      const mongoose = await import('mongoose');
+      await mongoose.default.disconnect();
+      console.log('MongoDB disconnected.');
+    } catch (err) {
+      console.error('Error during MongoDB disconnect:', err);
+    }
+    try {
+      const { redis } = await import('./config/redis');
+      await redis.quit();
+      console.log('Redis disconnected.');
+    } catch (err) {
+      console.error('Error during Redis disconnect:', err);
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 };
 
 startServer();

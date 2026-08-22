@@ -1,8 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { ForbiddenError } from '@casl/ability';
 
 export const errorHandler = (err: any, req: Request, res: Response, next: NextFunction) => {
   console.error('Error:', err);
+
+  // CASL authorization errors (centralized handling)
+  if (err instanceof ForbiddenError) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: err.message,
+    });
+  }
 
   if (err instanceof ZodError) {
     return res.status(400).json({

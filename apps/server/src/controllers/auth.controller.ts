@@ -40,8 +40,8 @@ import {
   verifyRecoveryCode,
 } from '../services/security.service';
 
-const otp = new OTP();
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+const otp = new OTP();
 const GENERIC_LOGIN_ERROR = 'Invalid email or password';
 const GENERIC_REGISTER_MESSAGE = 'If this email can be used, a verification email has been sent.';
 const RESET_MESSAGE = 'If an account exists with that email, a password reset link has been sent.';

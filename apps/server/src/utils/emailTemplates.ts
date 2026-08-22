@@ -6,6 +6,10 @@
  * BASE_URL is injected from env.CLIENT_URL at each call site — never hardcoded.
  */
 
+/** Escape user-controlled values before interpolating into HTML email templates. */
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 const baseLayout = (body: string, baseUrl: string, options?: { showUnsubscribe?: boolean }) => `
 <!DOCTYPE html>
 <html lang="en">
@@ -54,7 +58,7 @@ const baseLayout = (body: string, baseUrl: string, options?: { showUnsubscribe?:
 `;
 
 export const welcomeEmail = (name: string, baseUrl: string) => baseLayout(`
-  <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Welcome to Deltaora, ${name}!</h2>
+  <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Welcome to Deltaora, ${escapeHtml(name)}!</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     Your account has been successfully created. Deltaora helps you monitor web pages for changes with AI-powered analysis.
   </p>
@@ -113,7 +117,7 @@ export const passwordResetEmail = (resetUrl: string, baseUrl: string) => baseLay
 export const workspaceInviteEmail = (inviterName: string, workspaceName: string, joinUrl: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">You've Been Invited!</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
-    <strong>${inviterName}</strong> has invited you to join the workspace <strong>"${workspaceName}"</strong> on Deltaora.
+    <strong>${escapeHtml(inviterName)}</strong> has invited you to join the workspace <strong>"${escapeHtml(workspaceName)}"</strong> on Deltaora.
   </p>
   <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #4b5563;">
     Click the button below to accept the invitation. This link expires in <strong>48 hours</strong>.
@@ -134,9 +138,9 @@ export const pageChangeNotificationEmail = (pageTitle: string, pageUrl: string, 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 24px;">
     <tr>
       <td style="padding: 16px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
-        <p style="margin: 0 0 4px; font-size: 16px; font-weight: 600; color: #111827;">${pageTitle}</p>
-        <p style="margin: 0 0 12px; font-size: 13px; color: #6b7280; word-break: break-all;">${pageUrl}</p>
-        <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4b5563;">${summaryText}</p>
+        <p style="margin: 0 0 4px; font-size: 16px; font-weight: 600; color: #111827;">${escapeHtml(pageTitle)}</p>
+        <p style="margin: 0 0 12px; font-size: 13px; color: #6b7280; word-break: break-all;">${escapeHtml(pageUrl)}</p>
+        <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4b5563;">${escapeHtml(summaryText)}</p>
       </td>
     </tr>
   </table>

@@ -4,6 +4,8 @@ import { AISummary } from '../models/AISummary';
 import { redis } from '../config/redis';
 import { ForbiddenError } from '@casl/ability';
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export const search = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workspaceId = req.workspaceId;
@@ -24,7 +26,7 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     const cached = await redis.get(cacheKey);
     
     if (cached) {
-      await redis.zincrby('top-searches', 1, query);
+      await redis.zincrby(`top-searches:${workspaceId}`, 1, query);
       return res.json(JSON.parse(cached));
     }
 
@@ -32,14 +34,14 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     const urls = await MonitoredPage.find({
       workspaceId,
       $or: [
-        { url: { $regex: query, $options: 'i' } },
-        { title: { $regex: query, $options: 'i' } }
+        { url: { $regex: escapeRegex(query), $options: 'i' } },
+        { title: { $regex: escapeRegex(query), $options: 'i' } }
       ]
     }).limit(10);
 
     const summaries = await AISummary.find({
       workspaceId,
-      summary: { $regex: query, $options: 'i' }
+      summary: { $regex: escapeRegex(query), $options: 'i' }
     }).limit(10);
 
     const result = { urls, summaries };
@@ -48,7 +50,8 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
     await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
     
     // Track popular search
-    await redis.zincrby('top-searches', 1, query);
+    await redis.zincrby(`top-searches:${workspaceId}`, 1, query);
+    await redis.zremrangebyrank(`top-searches:${workspaceId}`, 0, -101);
 
     res.json(result);
   } catch (error: unknown) {

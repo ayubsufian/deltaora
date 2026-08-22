@@ -3,6 +3,8 @@ import { MonitoredPage } from '../models/MonitoredPage';
 import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
 import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
+import { AISummary } from '../models/AISummary';
+import { Notification } from '../models/Notification';
 import { Workspace } from '../models/Workspace';
 import { PageStatus } from '@deltaora/shared-types';
 import { ForbiddenError } from '@casl/ability';
@@ -10,6 +12,8 @@ import { logAuditEvent } from '../services/audit.service';
 import { encryptSecret } from '../services/security.service';
 import { assertSafeScrapeUrl } from '../services/urlSafety.service';
 import { discoverSite as discoverSiteUrls } from '../services/siteDiscovery.service';
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const splitCrawlerConfig = (crawlerConfig: any) => {
   if (!crawlerConfig) {
@@ -40,7 +44,7 @@ export const getPages = async (req: Request, res: Response, next: NextFunction) 
     if (category) query.category = category;
     if (status) query.status = status;
     if (importance) query.importance = importance;
-    if (search) query.title = { $regex: search, $options: 'i' };
+    if (search) query.title = { $regex: escapeRegex(search as string), $options: 'i' };
     
     if (startDate || endDate) {
       query.createdAt = {};
@@ -350,6 +354,15 @@ export const updatePage = async (req: Request, res: Response, next: NextFunction
       return res.status(404).json({ error: 'Page not found' });
     }
 
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: req.user!.userId,
+      action: 'page.updated',
+      resourceId: id,
+      metadata: { updatedFields: Object.keys(req.body) },
+      req
+    });
+
     res.json(page);
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
@@ -371,6 +384,17 @@ export const deletePage = async (req: Request, res: Response, next: NextFunction
     if (!page) {
       return res.status(404).json({ error: 'Page not found' });
     }
+
+    // Cascade-delete related data (GDPR data minimization)
+    const relatedDiffs = await Diff.find({ pageId: id, workspaceId }).select('_id');
+    await Promise.all([
+      Snapshot.deleteMany({ pageId: id, workspaceId }),
+      Diff.deleteMany({ pageId: id, workspaceId }),
+      ...(relatedDiffs.length > 0
+        ? [AISummary.deleteMany({ diffId: { $in: relatedDiffs.map(d => d._id) }, workspaceId })]
+        : []),
+      Notification.deleteMany({ pageId: id }),
+    ]);
     
     // Log Audit Event
     await logAuditEvent({
@@ -409,6 +433,15 @@ export const togglePageStatus = async (req: Request, res: Response, next: NextFu
     if (!page) {
       return res.status(404).json({ error: 'Page not found' });
     }
+
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: req.user!.userId,
+      action: 'page.status_toggled',
+      resourceId: id,
+      metadata: { status },
+      req
+    });
 
     res.json(page);
   } catch (error: unknown) {

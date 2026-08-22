@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { Diff } from '../models/Diff';
+import { AISummary } from '../models/AISummary';
 import { ForbiddenError } from '@casl/ability';
 
 export const getTimeseriesStats = async (req: Request, res: Response, next: NextFunction) => {
@@ -39,22 +40,35 @@ export const getTimeseriesStats = async (req: Request, res: Response, next: Next
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const monthlyChanges = await Diff.aggregate([
-      { $match: { workspaceId: workspaceObjectId, createdAt: { $gte: thirtyDaysAgo } } },
-      {
-        $group: {
-          _id: { $isoWeek: "$createdAt" },
-          changes: { $sum: 1 }
-        }
-      },
-      { $sort: { _id: 1 } }
+    const [monthlyChanges, monthlySummaries] = await Promise.all([
+      Diff.aggregate([
+        { $match: { workspaceId: workspaceObjectId, createdAt: { $gte: thirtyDaysAgo } } },
+        {
+          $group: {
+            _id: { $isoWeek: "$createdAt" },
+            changes: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]),
+      AISummary.aggregate([
+        { $match: { workspaceId: workspaceObjectId, createdAt: { $gte: thirtyDaysAgo } } },
+        {
+          $group: {
+            _id: { $isoWeek: "$createdAt" },
+            summaries: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]),
     ]);
 
-    // Format monthly data
+    // Merge monthly changes and summaries by ISO week
+    const summaryMap = new Map(monthlySummaries.map((s: any) => [s._id, s.summaries]));
     const monthly = monthlyChanges.map((m, i) => ({
       name: `Week ${i + 1}`,
       changes: m.changes,
-      summaries: Math.floor(m.changes * 0.8) // Approximation for now
+      summaries: summaryMap.get(m._id) ?? 0,
     }));
 
     res.json({ weekly, monthly });

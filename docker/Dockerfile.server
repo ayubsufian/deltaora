@@ -18,10 +18,10 @@ RUN pnpm --filter=@deltaora/server build
 FROM mcr.microsoft.com/playwright:v1.44.1-jammy
 
 WORKDIR /app
-# Install Node.js (since Playwright image is based on Ubuntu)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
-    npm install -g pnpm@10.33.0
+# Copy Node.js from builder stage (avoids deprecated NodeSource script)
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/bin/corepack /usr/local/bin/corepack
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Copy workspace
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./

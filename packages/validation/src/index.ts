@@ -122,8 +122,8 @@ export const createCrawlerAuthSessionSchema = z.object({
 export const createPageSchema = z.object({
   url: z.string().url("Must be a valid URL"),
   title: z.string().min(1, "Title is required").max(100),
-  category: z.nativeEnum(Category).default(Category.GENERAL),
-  importance: z.nativeEnum(Importance).default(Importance.MEDIUM),
+  category: z.enum(Object.values(Category) as [string, ...string[]]).default(Category.GENERAL),
+  importance: z.enum(Object.values(Importance) as [string, ...string[]]).default(Importance.MEDIUM),
   checkInterval: z.number().min(APP_CONFIG.MIN_CHECK_INTERVAL).max(APP_CONFIG.MAX_CHECK_INTERVAL).default(APP_CONFIG.DEFAULT_CHECK_INTERVAL),
   crawlerConfig: crawlerConfigSchema.optional(),
 });
