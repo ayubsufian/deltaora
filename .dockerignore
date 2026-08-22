@@ -1,0 +1,31 @@
+# Version control
+.git
+.gitignore
+
+# Local environment and secrets
+.env
+.env.*
+production.env
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build and test output
+dist
+build
+coverage
+*.log
+*.tsbuildinfo
+
+# Tool caches and editor state
+.cache
+.turbo
+.vite
+.eslintcache
+.idea
+.vscode

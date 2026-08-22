@@ -1,0 +1,171 @@
+name: deltaora
+
+services:
+  frontend:
+    image: "${DELTAORA_FRONTEND_IMAGE:?Set DELTAORA_FRONTEND_IMAGE to an immutable image reference, preferably ghcr.io/ayubsufian/deltaora-frontend@sha256:<digest>}"
+    networks:
+      - deltaora-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  backend:
+    image: "${DELTAORA_BACKEND_IMAGE:?Set DELTAORA_BACKEND_IMAGE to an immutable image reference, preferably ghcr.io/ayubsufian/deltaora-backend@sha256:<digest>}"
+    expose:
+      - "5000"
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      CLIENT_URL: "${CLIENT_URL:?Set CLIENT_URL to the public HTTPS origin}"
+      MONGO_HOST: mongodb
+      MONGO_PORT: "27017"
+      MONGO_DATABASE: deltaora
+      MONGO_ROOT_USERNAME: "${MONGO_ROOT_USERNAME:-deltaora}"
+      MONGO_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_REFRESH_SECRET_FILE: /run/secrets/jwt_refresh_secret
+      CSRF_SECRET_FILE: /run/secrets/csrf_secret
+      MFA_SECRET_ENCRYPTION_KEY_FILE: /run/secrets/mfa_secret_encryption_key
+      GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+      BREVO_API_KEY_FILE: /run/secrets/brevo_api_key
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}"
+      WEBAUTHN_RP_ID: "${WEBAUTHN_RP_ID:?Set WEBAUTHN_RP_ID to the production relying-party domain}"
+      WEBAUTHN_ORIGIN: "${WEBAUTHN_ORIGIN:?Set WEBAUTHN_ORIGIN to the public HTTPS origin}"
+      PASSWORD_BREACH_SCREENING_MODE: "${PASSWORD_BREACH_SCREENING_MODE:-api}"
+      PASSWORD_BREACH_SCREENING_FAILURE_POLICY: block
+      PASSWORD_BREACH_SCREENING_TIMEOUT_MS: "${PASSWORD_BREACH_SCREENING_TIMEOUT_MS:-3000}"
+      PASSWORD_BREACH_SCREENING_CACHE_TTL_SECONDS: "${PASSWORD_BREACH_SCREENING_CACHE_TTL_SECONDS:-86400}"
+      PASSWORD_BREACH_SCREENING_CACHE_MAX_PREFIXES: "${PASSWORD_BREACH_SCREENING_CACHE_MAX_PREFIXES:-4096}"
+      PASSWORD_BREACH_SCREENING_LOCAL_DIR: "${PASSWORD_BREACH_SCREENING_LOCAL_DIR:-}"
+      PWNED_PASSWORDS_RANGE_URL: "${PWNED_PASSWORDS_RANGE_URL:-https://api.pwnedpasswords.com/range}"
+      PWNED_PASSWORDS_USER_AGENT: "${PWNED_PASSWORDS_USER_AGENT:-Deltaora password breach screening}"
+      CRAWLER_USER_AGENT: "${CRAWLER_USER_AGENT:-DeltaoraBot/1.0 (+https://deltaora.local/crawler)}"
+      CRAWLER_CONTACT_URL: "${CRAWLER_CONTACT_URL:-}"
+      CRAWLER_RESPECT_ROBOTS: "${CRAWLER_RESPECT_ROBOTS:-true}"
+      CRAWLER_ALLOW_PRIVATE_NETWORKS: "${CRAWLER_ALLOW_PRIVATE_NETWORKS:-false}"
+      CRAWLER_PRIVATE_NETWORK_ALLOWLIST: "${CRAWLER_PRIVATE_NETWORK_ALLOWLIST:-}"
+      CRAWLER_ROBOTS_UNAVAILABLE_POLICY: "${CRAWLER_ROBOTS_UNAVAILABLE_POLICY:-fail_closed}"
+      CRAWLER_MAX_BYTES: "${CRAWLER_MAX_BYTES:-10000000}"
+      CRAWLER_MAX_REDIRECTS: "${CRAWLER_MAX_REDIRECTS:-5}"
+      CRAWLER_MIN_HOST_DELAY_MS: "${CRAWLER_MIN_HOST_DELAY_MS:-5000}"
+      CRAWLER_ROBOTS_CACHE_SECONDS: "${CRAWLER_ROBOTS_CACHE_SECONDS:-3600}"
+      CRAWLER_ROBOTS_MAX_BYTES: "${CRAWLER_ROBOTS_MAX_BYTES:-512000}"
+      EMAIL_FROM: "${EMAIL_FROM:-noreply@deltaora.com}"
+      PROXY_URL: "${PROXY_URL:-}"
+    secrets:
+      - mongo_root_password
+      - redis_password
+      - jwt_secret
+      - jwt_refresh_secret
+      - csrf_secret
+      - mfa_secret_encryption_key
+      - gemini_api_key
+      - brevo_api_key
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - deltaora-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  mongodb:
+    image: "${MONGO_IMAGE:?Set MONGO_IMAGE to an immutable image reference, preferably mongo:7.0@sha256:<digest>}"
+    expose:
+      - "27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_ROOT_USERNAME:-deltaora}"
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+    volumes:
+      - mongodb_data:/data/db
+    secrets:
+      - mongo_root_password
+    networks:
+      - deltaora-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"${MONGO_ROOT_USERNAME:-deltaora}\" --password \"$(cat /run/secrets/mongo_root_password)\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  redis:
+    image: "${REDIS_IMAGE:?Set REDIS_IMAGE to an immutable image reference, preferably redis:7-alpine@sha256:<digest>}"
+    command: ["sh", "-c", "redis-server --requirepass \"$(cat /run/secrets/redis_password)\""]
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    secrets:
+      - redis_password
+    networks:
+      - deltaora-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$(cat /run/secrets/redis_password)\" ping | grep PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: "${NGINX_IMAGE:?Set NGINX_IMAGE to an immutable image reference, preferably nginx:alpine@sha256:<digest>}"
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - deltaora-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  deltaora-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+secrets:
+  mongo_root_password:
+    file: "${MONGO_ROOT_PASSWORD_SOURCE:?Set MONGO_ROOT_PASSWORD_SOURCE to the file containing the MongoDB root password}"
+  redis_password:
+    file: "${REDIS_PASSWORD_SOURCE:?Set REDIS_PASSWORD_SOURCE to the file containing the Redis password}"
+  jwt_secret:
+    file: "${JWT_SECRET_SOURCE:?Set JWT_SECRET_SOURCE to the file containing JWT_SECRET}"
+  jwt_refresh_secret:
+    file: "${JWT_REFRESH_SECRET_SOURCE:?Set JWT_REFRESH_SECRET_SOURCE to the file containing JWT_REFRESH_SECRET}"
+  csrf_secret:
+    file: "${CSRF_SECRET_SOURCE:?Set CSRF_SECRET_SOURCE to the file containing CSRF_SECRET}"
+  mfa_secret_encryption_key:
+    file: "${MFA_SECRET_ENCRYPTION_KEY_SOURCE:?Set MFA_SECRET_ENCRYPTION_KEY_SOURCE to the file containing MFA_SECRET_ENCRYPTION_KEY}"
+  gemini_api_key:
+    file: "${GEMINI_API_KEY_SOURCE:?Set GEMINI_API_KEY_SOURCE to the file containing GEMINI_API_KEY}"
+  brevo_api_key:
+    file: "${BREVO_API_KEY_SOURCE:?Set BREVO_API_KEY_SOURCE to the file containing BREVO_API_KEY, or an empty file if email is disabled}"

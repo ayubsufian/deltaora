@@ -13,13 +13,13 @@ AI-Powered Website Change Monitoring & Intelligent Policy Tracking Platform.
 ## Getting Started
 
 1. Copy `.env.example` to `.env` and fill in values (especially `GEMINI_API_KEY`).
-2. Start the application with Docker Compose:
+2. Start the local infrastructure with Docker Compose:
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
-The app will be available at `http://localhost`.
+This starts MongoDB and Redis on localhost-only ports. Run the app with `pnpm run dev`.
 
 ## Local Development
 
@@ -34,6 +34,17 @@ pnpm install
 
 # Run all services (Frontend + Backend)
 pnpm run dev
+```
+
+## Production Docker Compose
+
+Production deploys use `compose.prod.yaml`. CI/CD should publish immutable image references, preferably digest-pinned GHCR images, and the production host should keep secrets in files rather than plain environment variables.
+
+```bash
+cp production.env.example production.env
+# Edit production.env and create the secret files it references.
+docker compose --env-file production.env -f compose.prod.yaml pull
+docker compose --env-file production.env -f compose.prod.yaml up -d
 ```
 
 ## Password Breach Screening

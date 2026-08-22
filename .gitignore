@@ -4,6 +4,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+production.env
 
 # Dependencies
 node_modules/
@@ -35,3 +36,6 @@ coverage/
 
 # Docker
 docker-compose.override.yml
+docker-compose.override.yaml
+compose.override.yml
+compose.override.yaml

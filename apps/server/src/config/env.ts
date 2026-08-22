@@ -1,7 +1,63 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
 dotenv.config({ path: '../../.env' }); // Load from root
+
+const readSecretFile = (filePath: string, key: string) => {
+  try {
+    return fs.readFileSync(filePath, 'utf8').replace(/\r?\n$/, '');
+  } catch (error) {
+    console.error(`Invalid ${key}_FILE value. Could not read ${filePath}:`, error);
+    process.exit(1);
+  }
+};
+
+const fileBackedEnvKeys = [
+  'MONGODB_URI',
+  'REDIS_URL',
+  'JWT_SECRET',
+  'JWT_REFRESH_SECRET',
+  'CSRF_SECRET',
+  'MFA_SECRET_ENCRYPTION_KEY',
+  'GEMINI_API_KEY',
+  'BREVO_API_KEY',
+] as const;
+
+const getFileBackedValue = (envInput: NodeJS.ProcessEnv, key: string) => {
+  const filePath = envInput[`${key}_FILE`];
+  if (filePath) return readSecretFile(filePath, key);
+  return envInput[key];
+};
+
+const resolveFileBackedEnv = (source: NodeJS.ProcessEnv) => {
+  const envInput = { ...source };
+
+  for (const key of fileBackedEnvKeys) {
+    const value = getFileBackedValue(envInput, key);
+    if (value !== undefined) envInput[key] = value;
+  }
+
+  const mongoPassword = getFileBackedValue(envInput, 'MONGO_ROOT_PASSWORD');
+  if (!envInput.MONGODB_URI && mongoPassword) {
+    const username = encodeURIComponent(envInput.MONGO_ROOT_USERNAME || 'deltaora');
+    const password = encodeURIComponent(mongoPassword);
+    const host = envInput.MONGO_HOST || 'mongodb';
+    const port = envInput.MONGO_PORT || '27017';
+    const database = encodeURIComponent(envInput.MONGO_DATABASE || 'deltaora');
+    envInput.MONGODB_URI = `mongodb://${username}:${password}@${host}:${port}/${database}?authSource=admin`;
+  }
+
+  const redisPassword = getFileBackedValue(envInput, 'REDIS_PASSWORD');
+  if (!envInput.REDIS_URL && redisPassword) {
+    const password = encodeURIComponent(redisPassword);
+    const host = envInput.REDIS_HOST || 'redis';
+    const port = envInput.REDIS_PORT || '6379';
+    envInput.REDIS_URL = `redis://:${password}@${host}:${port}`;
+  }
+
+  return envInput;
+};
 
 const booleanFromEnv = (defaultValue: boolean) =>
   z.preprocess(value => {
@@ -88,7 +144,7 @@ const envSchema = z.object({
   }
 });
 
-const _env = envSchema.safeParse(process.env);
+const _env = envSchema.safeParse(resolveFileBackedEnv(process.env));
 
 if (!_env.success) {
   console.error('❌ Invalid environment variables:', _env.error.format());
