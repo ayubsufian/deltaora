@@ -47,7 +47,7 @@ export function Register() {
   };
 
   return (
-    <Card className="w-full">
+    <Card>
       <CardHeader className="text-center">
         <CardTitle>Create an account</CardTitle>
         <CardDescription>Start monitoring websites for changes today</CardDescription>
@@ -70,7 +70,7 @@ export function Register() {
               <span className="w-full border-t border-gray-300 dark:border-gray-700" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white dark:bg-gray-800 px-2 text-gray-500">
+              <span className="bg-white dark:bg-gray-900 px-2 text-gray-500">
                 Or continue with
               </span>
             </div>

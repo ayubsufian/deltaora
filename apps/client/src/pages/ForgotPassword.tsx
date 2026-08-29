@@ -27,8 +27,7 @@ export function ForgotPassword() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-[calc(100vh-160px)]">
-      <Card className="w-full max-w-md animate-in zoom-in-95 duration-300">
+    <Card>
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold tracking-tight text-center">Reset Password</CardTitle>
           <CardDescription className="text-center">
@@ -71,7 +70,6 @@ export function ForgotPassword() {
             </Link>
           </div>
         </CardFooter>
-      </Card>
-    </div>
+    </Card>
   );
 }
