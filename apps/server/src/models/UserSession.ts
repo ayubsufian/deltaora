@@ -25,7 +25,7 @@ const UserSessionSchema = new Schema<IUserSessionDocument>(
     lastSeenAt: { type: Date, default: Date.now },
     reauthenticatedAt: { type: Date },
     mfaVerifiedAt: { type: Date },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     absoluteExpiresAt: { type: Date, required: true, index: true },
     revokedAt: { type: Date },
     revokedReason: { type: String },

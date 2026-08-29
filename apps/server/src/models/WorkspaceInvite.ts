@@ -20,7 +20,7 @@ const WorkspaceInviteSchema = new Schema<IWorkspaceInviteDocument>(
     inviteeEmail: { type: String, lowercase: true, trim: true },
     role: { type: String, enum: ['editor', 'viewer'], required: true },
     tokenHash: { type: String, required: true, unique: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     acceptedAt: { type: Date },
     revokedAt: { type: Date },
   },
