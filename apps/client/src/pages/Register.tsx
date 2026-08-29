@@ -53,7 +53,7 @@ export function Register() {
         <CardDescription>Start monitoring websites for changes today</CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)}>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-5">
           <div className="flex justify-center w-full">
             <GoogleLogin
               onSuccess={handleGoogleSuccess}
@@ -65,13 +65,13 @@ export function Register() {
             />
           </div>
           
-          <div className="relative">
+          <div className="relative my-1">
             <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-gray-300 dark:border-gray-700" />
+              <span className="w-full border-t border-gray-200 dark:border-gray-800" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white dark:bg-gray-900 px-2 text-gray-500">
-                Or continue with
+              <span className="bg-white dark:bg-gray-900 px-3 text-gray-400 dark:text-gray-500 font-medium tracking-wider">
+                or
               </span>
             </div>
           </div>
@@ -110,7 +110,7 @@ export function Register() {
           </Button>
           <p className="text-sm text-center text-gray-500 dark:text-gray-400">
             Already have an account?{' '}
-            <Link to="/login" className="text-blue-600 hover:underline">
+            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
               Sign in
             </Link>
           </p>

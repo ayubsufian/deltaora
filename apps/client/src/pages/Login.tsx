@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
 import { GoogleLogin } from '@react-oauth/google';
+import { Fingerprint } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const mfaLoginSchema = loginSchema.extend({
@@ -82,7 +83,7 @@ export function Login() {
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)}>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-5">
           {!requiresMfa && (
             <>
               <div className="flex justify-center w-full">
@@ -95,17 +96,18 @@ export function Login() {
                   width="100%"
                 />
               </div>
-              <Button type="button" variant="outline" className="w-full" onClick={handlePasskeyLogin}>
+              <Button type="button" variant="outline" className="w-full gap-2" onClick={handlePasskeyLogin}>
+                <Fingerprint className="h-4 w-4" />
                 Sign in with passkey
               </Button>
               
-              <div className="relative">
+              <div className="relative my-1">
                 <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-gray-300 dark:border-gray-700" />
+                  <span className="w-full border-t border-gray-200 dark:border-gray-800" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white dark:bg-gray-900 px-2 text-gray-500">
-                    Or continue with
+                  <span className="bg-white dark:bg-gray-900 px-3 text-gray-400 dark:text-gray-500 font-medium tracking-wider">
+                    or
                   </span>
                 </div>
               </div>
@@ -121,12 +123,12 @@ export function Login() {
               error={errors.email?.message}
             />
             
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Password
                 </label>
-                <Link to="/forgot-password" className="text-sm font-medium text-blue-600 hover:underline">
+                <Link to="/forgot-password" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
                   Forgot password?
                 </Link>
               </div>
@@ -167,7 +169,7 @@ export function Login() {
           {!requiresMfa && (
             <p className="text-sm text-center text-gray-500 dark:text-gray-400">
               Don't have an account?{' '}
-              <Link to="/register" className="text-blue-600 hover:underline">
+              <Link to="/register" className="font-medium text-blue-600 hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
                 Create one
               </Link>
             </p>
@@ -176,9 +178,9 @@ export function Login() {
             <button 
               type="button" 
               onClick={() => setRequiresMfa(false)}
-              className="text-sm text-gray-500 hover:underline"
+              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >
-              Back to login
+              ← Back to login
             </button>
           )}
         </CardFooter>
