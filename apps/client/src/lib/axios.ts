@@ -18,7 +18,7 @@ const getCookie = (name: string) => {
   return cookie ? decodeURIComponent(cookie.split('=')[1]) : null;
 };
 
-const ensureCsrfToken = async () => {
+export const ensureCsrfToken = async () => {
   const existing = getCookie(CSRF_COOKIE);
   if (existing) return existing;
 
@@ -48,7 +48,10 @@ api.interceptors.response.use(
   },
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const requestUrl = originalRequest?.url || '';
+    const isRefreshRequest = requestUrl.endsWith('/auth/refresh');
+
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true;
       try {
         const csrfToken = await ensureCsrfToken();

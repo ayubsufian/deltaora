@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import api from '../lib/axios';
-import axios from 'axios';
 import { startAuthentication } from '@simplewebauthn/browser';
 
 interface User {
@@ -42,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const restore = async () => {
       try {
-        const res = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
+        const res = await api.post('/auth/refresh');
         setUser(res.data.user);
 
         const savedWorkspace = localStorage.getItem('activeWorkspaceId');

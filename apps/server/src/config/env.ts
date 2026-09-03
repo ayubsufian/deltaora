@@ -70,6 +70,9 @@ const booleanFromEnv = (defaultValue: boolean) =>
     return value;
   }, z.boolean());
 
+const resolvedEnv = resolveFileBackedEnv(process.env);
+const defaultEmailDeliveryMode = resolvedEnv.NODE_ENV === 'production' ? 'brevo' : 'console';
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('5000'),
@@ -116,6 +119,7 @@ const envSchema = z.object({
   CRAWLER_ROBOTS_MAX_BYTES: z.coerce.number().int().positive().max(1_000_000).default(512_000),
   
   // Brevo Email
+  EMAIL_DELIVERY_MODE: z.enum(['console', 'brevo', 'disabled']).default(defaultEmailDeliveryMode),
   BREVO_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
 }).superRefine((value, ctx) => {
@@ -142,9 +146,17 @@ const envSchema = z.object({
       message: 'Production password breach screening must fail closed with PASSWORD_BREACH_SCREENING_FAILURE_POLICY=block',
     });
   }
+
+  if (value.EMAIL_DELIVERY_MODE === 'brevo' && !value.BREVO_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['BREVO_API_KEY'],
+      message: 'BREVO_API_KEY is required when EMAIL_DELIVERY_MODE=brevo',
+    });
+  }
 });
 
-const _env = envSchema.safeParse(resolveFileBackedEnv(process.env));
+const _env = envSchema.safeParse(resolvedEnv);
 
 if (!_env.success) {
   console.error('❌ Invalid environment variables:', _env.error.format());

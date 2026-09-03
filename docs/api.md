@@ -101,6 +101,8 @@ All endpoints require `requireAuth`, `requireVerifiedEmail`, and `resolveAbility
 
 ## Dashboard
 
+Requires `requireAuth` and `resolveAbility`. Unverified email accounts can read this onboarding-safe overview, but product mutations remain gated by email verification.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/dashboard` | Dashboard stats (cached 10 min) + latest 5 user notifications |
@@ -117,9 +119,11 @@ All endpoints require `requireAuth`, `requireVerifiedEmail`, and `resolveAbility
 
 ## Statistics
 
+Requires `requireAuth` and `resolveAbility`. Unverified email accounts can read onboarding-safe statistics for their own workspace.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/stats` | Weekly and monthly change/summary timeseries data |
+| `GET` | `/stats/timeseries` | Weekly and monthly change/summary timeseries data |
 
 ---
 
