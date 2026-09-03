@@ -27,6 +27,14 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
     });
   }
 
+  if (err.name === 'EmailDeliveryError') {
+    return res.status(err.statusCode || 503).json({
+      error: err.message,
+      code: err.code,
+      retryable: err.retryable,
+    });
+  }
+
   const statusCode = err.statusCode || 500;
 
   // Suppress internal error details in production to prevent information disclosure

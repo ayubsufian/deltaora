@@ -121,6 +121,7 @@ const envSchema = z.object({
   
   // Brevo Email
   EMAIL_DELIVERY_MODE: z.enum(['console', 'brevo', 'disabled']).default(defaultEmailDeliveryMode),
+  EMAIL_PROVIDER_STARTUP_CHECK: booleanFromEnv(defaultEmailDeliveryMode === 'brevo'),
   BREVO_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
 }).superRefine((value, ctx) => {

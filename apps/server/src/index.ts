@@ -13,6 +13,7 @@ import { csrfProtection } from './middleware/csrf';
 import { initializeWorkers } from './workers';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
+import { isEmailDeliveryError, validateEmailProvider } from './services/email.service';
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use(errorHandler);
 
 // Start Server
 const startServer = async () => {
+  await validateEmailProvider();
   await connectDB();
   initializeWorkers();
   
@@ -85,4 +87,11 @@ const startServer = async () => {
   process.on('SIGINT', () => shutdown('SIGINT'));
 };
 
-startServer();
+startServer().catch((error) => {
+  if (isEmailDeliveryError(error)) {
+    console.error(`Startup failed: ${error.message} (${error.code})`);
+  } else {
+    console.error('Startup failed:', error);
+  }
+  process.exit(1);
+});
