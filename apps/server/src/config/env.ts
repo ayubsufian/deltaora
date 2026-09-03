@@ -71,7 +71,8 @@ const booleanFromEnv = (defaultValue: boolean) =>
   }, z.boolean());
 
 const resolvedEnv = resolveFileBackedEnv(process.env);
-const defaultEmailDeliveryMode = resolvedEnv.NODE_ENV === 'production' ? 'brevo' : 'console';
+const defaultEmailDeliveryMode = resolvedEnv.NODE_ENV === 'test' ? 'console' : 'brevo';
+const brevoApiKeySchema = /^xkeysib-[A-Za-z0-9_-]{20,}$/;
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -152,6 +153,14 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['BREVO_API_KEY'],
       message: 'BREVO_API_KEY is required when EMAIL_DELIVERY_MODE=brevo',
+    });
+  }
+
+  if (value.EMAIL_DELIVERY_MODE === 'brevo' && value.BREVO_API_KEY && !brevoApiKeySchema.test(value.BREVO_API_KEY.trim())) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['BREVO_API_KEY'],
+      message: 'BREVO_API_KEY must be a valid Brevo API key, for example xkeysib-...',
     });
   }
 });
