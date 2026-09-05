@@ -26,14 +26,22 @@ function RuleRow({ passed, label }: { passed: boolean; label: string }) {
 }
 
 // ── Strength Meter Bar ─────────────────────────────────────────────────────────
-// All filled segments share one color that represents the current strength tier.
-// This is the 2026 industry standard used by GitHub, 1Password, Apple, and Bitwarden.
-// A rainbow per-segment approach is incorrect: it shows a red segment even on a
-// "Strong" password, which sends a contradictory visual signal to the user.
+// Color classes MUST be defined here as literal strings so Tailwind's scanner
+// includes them in the compiled CSS. Strings returned from the validation package
+// (a different directory) are invisible to Tailwind and get purged.
+const STRENGTH_CONFIG = {
+  0: { bar: '',                label: ''                                   },
+  1: { bar: 'bg-red-500',      label: 'text-red-500'                       },
+  2: { bar: 'bg-orange-400',   label: 'text-orange-500'                    },
+  3: { bar: 'bg-yellow-400',   label: 'text-yellow-600 dark:text-yellow-400' },
+  4: { bar: 'bg-green-500',    label: 'text-green-600 dark:text-green-400' },
+} as const;
+
 function StrengthMeter({ password, email, name }: { password: string; email: string; name: string }) {
   const strength = getPasswordStrength(password, { email, name });
-  if (!password) return null;
+  if (!password || strength.score === 0) return null;
 
+  const config = STRENGTH_CONFIG[strength.score];
   const segments = [1, 2, 3, 4] as const;
 
   return (
@@ -43,18 +51,13 @@ function StrengthMeter({ password, email, name }: { password: string; email: str
           <div
             key={seg}
             className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-              seg <= strength.score ? strength.color : 'bg-gray-200 dark:bg-gray-700'
+              seg <= strength.score ? config.bar : 'bg-gray-200 dark:bg-gray-700'
             }`}
           />
         ))}
       </div>
       {strength.label && (
-        <p className={`text-xs font-medium ${
-          strength.score <= 1 ? 'text-red-500' :
-          strength.score === 2 ? 'text-orange-500' :
-          strength.score === 3 ? 'text-yellow-600 dark:text-yellow-400' :
-          'text-green-600 dark:text-green-400'
-        }`}>
+        <p className={`text-xs font-medium ${config.label}`}>
           {strength.label}
         </p>
       )}

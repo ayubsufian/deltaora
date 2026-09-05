@@ -88,16 +88,19 @@ export const checkPasswordRules = (
  *   - Length is the PRIMARY entropy signal
  *   - Complexity (mixed case, digits, symbols) is a SECONDARY bonus only
  *   - A long passphrase without symbols can still reach Strong
+ *
+ * NOTE: Color classes are intentionally NOT returned here. They must live in
+ * the consuming component file so Tailwind's scanner can detect them.
  */
 export const getPasswordStrength = (
   password: string,
   context: { email?: string; name?: string } = {}
-): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } => {
-  if (!password) return { score: 0, label: '', color: '' };
+): { score: 0 | 1 | 2 | 3 | 4; label: string } => {
+  if (!password) return { score: 0, label: '' };
 
   // Any policy violation → Weak immediately
   const errors = validatePasswordLocally(password, context);
-  if (errors.length > 0) return { score: 1, label: 'Weak', color: 'bg-red-500' };
+  if (errors.length > 0) return { score: 1, label: 'Weak' };
 
   // Length tiers: primary entropy signal (NIST recommendation)
   let score = 0;
@@ -115,10 +118,10 @@ export const getPasswordStrength = (
 
   const clamped = Math.min(score, 4) as 0 | 1 | 2 | 3 | 4;
 
-  if (clamped <= 1) return { score: 1, label: 'Weak',   color: 'bg-red-500' };
-  if (clamped === 2) return { score: 2, label: 'Fair',   color: 'bg-orange-400' };
-  if (clamped === 3) return { score: 3, label: 'Good',   color: 'bg-yellow-400' };
-  return               { score: 4, label: 'Strong', color: 'bg-green-500' };
+  if (clamped <= 1) return { score: 1, label: 'Weak' };
+  if (clamped === 2) return { score: 2, label: 'Fair' };
+  if (clamped === 3) return { score: 3, label: 'Good' };
+  return               { score: 4, label: 'Strong' };
 };
 
 export const registerSchema = z.object({
