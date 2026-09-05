@@ -2,14 +2,101 @@ import { z } from 'zod';
 import { Category, Importance } from '@deltaora/shared-types';
 import { APP_CONFIG } from '@deltaora/config';
 
+// Mirrors the server-side COMMON_PASSWORDS set in passwordPolicy.service.ts
+const COMMON_PASSWORDS = new Set([
+  'password', 'password1', 'password123', '12345678', '123456789',
+  '1234567890', 'qwerty123', 'letmein123', 'adminadmin', 'welcome123',
+  'changeme', 'iloveyou', 'deltaora', 'deltaora123', 'deltaoradeltaora',
+  'changeme123', 'defaultpassword', 'newpassword', 'newpassword123',
+  'passwordpassword',
+]);
+
+const stripNonAlphanumeric = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+export const passwordRules = {
+  minLength: APP_CONFIG.PASSWORD_MIN_LENGTH,
+  maxLength: APP_CONFIG.PASSWORD_MAX_LENGTH,
+};
+
+/**
+ * Validates a password against all local policy rules given optional context.
+ * Returns an array of error messages (empty = valid).
+ */
+export const validatePasswordLocally = (
+  password: string,
+  context: { email?: string; name?: string } = {}
+): string[] => {
+  const errors: string[] = [];
+  const normalized = password.normalize('NFC');
+  const lower = normalized.toLowerCase();
+
+  if (normalized.length < APP_CONFIG.PASSWORD_MIN_LENGTH) {
+    errors.push(`Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters.`);
+  }
+  if (normalized.length > APP_CONFIG.PASSWORD_MAX_LENGTH) {
+    errors.push('Password is too long.');
+  }
+  if (COMMON_PASSWORDS.has(lower)) {
+    errors.push('Choose a less common password.');
+  }
+
+  const emailLocal = context.email?.split('@')[0]?.toLowerCase();
+  if (emailLocal && emailLocal.length >= 4 && lower.includes(emailLocal)) {
+    errors.push('Password must not contain your email address.');
+  }
+
+  const namePart = context.name ? stripNonAlphanumeric(context.name) : '';
+  if (namePart.length >= 4 && stripNonAlphanumeric(lower).includes(namePart)) {
+    errors.push('Password must not contain your name.');
+  }
+
+  return errors;
+};
+
+/**
+ * Returns a strength score 0–4 and a label for use in the UI strength meter.
+ */
+export const getPasswordStrength = (
+  password: string,
+  context: { email?: string; name?: string } = {}
+): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } => {
+  if (!password) return { score: 0, label: '', color: '' };
+
+  const errors = validatePasswordLocally(password, context);
+  if (errors.length > 0) return { score: 1, label: 'Weak', color: 'bg-red-500' };
+
+  let score = 0;
+  if (password.length >= 15) score++;
+  if (password.length >= 24) score++;
+  if (/[A-Z]/.test(password) && /[0-9]/.test(password)) score++;
+  if (/[^A-Za-z0-9]/.test(password)) score++;
+
+  if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-red-500' };
+  if (score === 2) return { score: 2, label: 'Fair', color: 'bg-orange-400' };
+  if (score === 3) return { score: 3, label: 'Good', color: 'bg-yellow-400' };
+  return { score: 4, label: 'Strong', color: 'bg-green-500' };
+};
+
 export const registerSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters").max(50),
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(APP_CONFIG.PASSWORD_MIN_LENGTH, `Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters`).max(APP_CONFIG.PASSWORD_MAX_LENGTH),
-  confirmPassword: z.string()
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
+  name: z.string().min(2, 'Name must be at least 2 characters').max(50),
+  email: z.string().email('Invalid email address'),
+  password: z.string()
+    .min(APP_CONFIG.PASSWORD_MIN_LENGTH, `Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters`)
+    .max(APP_CONFIG.PASSWORD_MAX_LENGTH, 'Password is too long'),
+  confirmPassword: z.string(),
+}).superRefine((data, ctx) => {
+  // Personal info checks (client mirrors server-side logic)
+  const errors = validatePasswordLocally(data.password, { email: data.email, name: data.name });
+  for (const msg of errors) {
+    // Skip min/max — zod already handles those above
+    if (!msg.includes('at least') && !msg.includes('too long')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg, path: ['password'] });
+    }
+  }
+
+  if (data.password !== data.confirmPassword) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Passwords don't match", path: ['confirmPassword'] });
+  }
 });
 
 export const loginSchema = z.object({
