@@ -66,8 +66,10 @@ export const checkPasswordRules = (
     (emailDomain && emailDomain.length >= 4 && lower.includes(emailDomain))
   );
 
-  const namePart = context.name ? stripNonAlphanumeric(context.name) : '';
-  const containsName = namePart.length >= 4 && stripNonAlphanumeric(lower).includes(namePart);
+  const nameParts = context.name
+    ? context.name.toLowerCase().split(/[\s_-]+/).map(stripNonAlphanumeric).filter(p => p.length >= 4)
+    : [];
+  const containsName = nameParts.some(part => stripNonAlphanumeric(lower).includes(part));
 
   return {
     hasMinLength:     normalized.length >= APP_CONFIG.PASSWORD_MIN_LENGTH,

@@ -199,8 +199,11 @@ export const validatePasswordPolicy = async (
     errors.push('Password must not contain your email address.');
   }
 
-  const namePart = context.name?.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (namePart && namePart.length >= 4 && lower.replace(/[^a-z0-9]/g, '').includes(namePart)) {
+  const nameParts = context.name
+    ? context.name.toLowerCase().split(/[\s_-]+/).map(p => p.replace(/[^a-z0-9]/g, '')).filter(p => p.length >= 4)
+    : [];
+  const passwordStripped = lower.replace(/[^a-z0-9]/g, '');
+  if (nameParts.some(part => passwordStripped.includes(part))) {
     errors.push('Password must not contain your name.');
   }
 
