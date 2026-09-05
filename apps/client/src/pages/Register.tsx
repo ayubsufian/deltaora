@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { registerSchema, getPasswordStrength, validatePasswordLocally } from '@deltaora/validation';
+import { registerSchema, getPasswordStrength, checkPasswordRules } from '@deltaora/validation';
 import { z } from 'zod';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
@@ -77,12 +77,8 @@ export function Register() {
   const email    = useWatch({ control, name: 'email',    defaultValue: '' });
   const name     = useWatch({ control, name: 'name',     defaultValue: '' });
 
-  // Local policy checks for the checklist UI
-  const localErrors = validatePasswordLocally(password, { email, name });
-  const hasMinLength  = password.length >= 15;
-  const notCommon     = password.length > 0 && !localErrors.some(e => e.includes('common'));
-  const notEmail      = password.length > 0 && !localErrors.some(e => e.includes('email'));
-  const notName       = password.length > 0 && !localErrors.some(e => e.includes('name'));
+  // Local policy checks for the checklist UI — typed, no string matching
+  const rules = checkPasswordRules(password, { email, name });
 
   const onSubmit = async (data: RegisterForm) => {
     try {
@@ -178,10 +174,10 @@ export function Register() {
             {/* Live rule checklist */}
             {password.length > 0 && (
               <ul className="space-y-1.5 pl-0.5">
-                <RuleRow passed={hasMinLength} label="At least 15 characters" />
-                <RuleRow passed={notCommon}    label="Not a commonly used password" />
-                <RuleRow passed={notEmail}     label="Doesn't contain your email address" />
-                <RuleRow passed={notName}      label="Doesn't contain your name" />
+                <RuleRow passed={rules.hasMinLength}     label="At least 15 characters" />
+                <RuleRow passed={rules.notCommon}        label="Not a commonly used password" />
+                <RuleRow passed={rules.notContainsEmail} label="Doesn't contain your email address" />
+                <RuleRow passed={rules.notContainsName}  label="Doesn't contain your name" />
               </ul>
             )}
           </div>

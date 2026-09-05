@@ -26,31 +26,56 @@ export const validatePasswordLocally = (
   password: string,
   context: { email?: string; name?: string } = {}
 ): string[] => {
+  const rules = checkPasswordRules(password, context);
   const errors: string[] = [];
+
+  if (!rules.hasMinLength) errors.push(`Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters.`);
+  if (!rules.notTooLong)   errors.push('Password is too long.');
+  if (!rules.notCommon)    errors.push('Choose a less common password.');
+  if (!rules.notContainsEmail) errors.push('Password must not contain your email address.');
+  if (!rules.notContainsName)  errors.push('Password must not contain your name.');
+
+  return errors;
+};
+
+/**
+ * Structured per-rule result used by the UI checklist.
+ * Avoids fragile string-matching on error messages.
+ */
+export interface PasswordRuleResult {
+  hasMinLength: boolean;
+  notTooLong: boolean;
+  notCommon: boolean;
+  notContainsEmail: boolean;
+  notContainsName: boolean;
+}
+
+export const checkPasswordRules = (
+  password: string,
+  context: { email?: string; name?: string } = {}
+): PasswordRuleResult => {
   const normalized = password.normalize('NFC');
   const lower = normalized.toLowerCase();
 
-  if (normalized.length < APP_CONFIG.PASSWORD_MIN_LENGTH) {
-    errors.push(`Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters.`);
-  }
-  if (normalized.length > APP_CONFIG.PASSWORD_MAX_LENGTH) {
-    errors.push('Password is too long.');
-  }
-  if (COMMON_PASSWORDS.has(lower)) {
-    errors.push('Choose a less common password.');
-  }
+  const emailParts = context.email?.toLowerCase().split('@');
+  const emailLocal = emailParts?.[0];
+  const emailDomain = emailParts?.[1]?.split('.')[0];
 
-  const emailLocal = context.email?.split('@')[0]?.toLowerCase();
-  if (emailLocal && emailLocal.length >= 4 && lower.includes(emailLocal)) {
-    errors.push('Password must not contain your email address.');
-  }
+  const containsEmail = !!(
+    (emailLocal && emailLocal.length >= 4 && lower.includes(emailLocal)) ||
+    (emailDomain && emailDomain.length >= 4 && lower.includes(emailDomain))
+  );
 
   const namePart = context.name ? stripNonAlphanumeric(context.name) : '';
-  if (namePart.length >= 4 && stripNonAlphanumeric(lower).includes(namePart)) {
-    errors.push('Password must not contain your name.');
-  }
+  const containsName = namePart.length >= 4 && stripNonAlphanumeric(lower).includes(namePart);
 
-  return errors;
+  return {
+    hasMinLength:     normalized.length >= APP_CONFIG.PASSWORD_MIN_LENGTH,
+    notTooLong:       normalized.length <= APP_CONFIG.PASSWORD_MAX_LENGTH,
+    notCommon:        !COMMON_PASSWORDS.has(lower),
+    notContainsEmail: !containsEmail,
+    notContainsName:  !containsName,
+  };
 };
 
 /**
@@ -85,13 +110,17 @@ export const registerSchema = z.object({
     .max(APP_CONFIG.PASSWORD_MAX_LENGTH, 'Password is too long'),
   confirmPassword: z.string(),
 }).superRefine((data, ctx) => {
-  // Personal info checks (client mirrors server-side logic)
-  const errors = validatePasswordLocally(data.password, { email: data.email, name: data.name });
-  for (const msg of errors) {
-    // Skip min/max — zod already handles those above
-    if (!msg.includes('at least') && !msg.includes('too long')) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: msg, path: ['password'] });
-    }
+  // Use structured rule check — no fragile string matching
+  const rules = checkPasswordRules(data.password, { email: data.email, name: data.name });
+
+  if (!rules.notCommon) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Choose a less common password.', path: ['password'] });
+  }
+  if (!rules.notContainsEmail) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Password must not contain your email address.', path: ['password'] });
+  }
+  if (!rules.notContainsName) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Password must not contain your name.', path: ['password'] });
   }
 
   if (data.password !== data.confirmPassword) {

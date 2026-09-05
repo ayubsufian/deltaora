@@ -187,8 +187,15 @@ export const validatePasswordPolicy = async (
     }
   }
 
-  const emailLocal = context.email?.split('@')[0]?.toLowerCase();
-  if (emailLocal && emailLocal.length >= 4 && lower.includes(emailLocal)) {
+  const emailParts = context.email?.toLowerCase().split('@');
+  const emailLocal = emailParts?.[0];
+  const emailDomain = emailParts?.[1]?.split('.')[0];
+
+  const containsEmail =
+    (emailLocal && emailLocal.length >= 4 && lower.includes(emailLocal)) ||
+    (emailDomain && emailDomain.length >= 4 && lower.includes(emailDomain));
+
+  if (containsEmail) {
     errors.push('Password must not contain your email address.');
   }
 
