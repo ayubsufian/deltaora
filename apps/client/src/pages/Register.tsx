@@ -26,6 +26,10 @@ function RuleRow({ passed, label }: { passed: boolean; label: string }) {
 }
 
 // ── Strength Meter Bar ─────────────────────────────────────────────────────────
+// All filled segments share one color that represents the current strength tier.
+// This is the 2026 industry standard used by GitHub, 1Password, Apple, and Bitwarden.
+// A rainbow per-segment approach is incorrect: it shows a red segment even on a
+// "Strong" password, which sends a contradictory visual signal to the user.
 function StrengthMeter({ password, email, name }: { password: string; email: string; name: string }) {
   const strength = getPasswordStrength(password, { email, name });
   if (!password) return null;
