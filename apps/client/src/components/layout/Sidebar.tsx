@@ -1,14 +1,15 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Globe, Bell, Search, BarChart3, LogOut } from 'lucide-react';
+import { LayoutDashboard, Globe, Bell, Search, BarChart3, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', to: '/dashboard' },
-  { icon: Globe, label: 'Monitored Pages', to: '/pages' },
-  { icon: Bell, label: 'Notifications', to: '/notifications' },
-  { icon: Search, label: 'Search', to: '/search' },
-  { icon: BarChart3, label: 'Statistics', to: '/statistics' },
+  { icon: LayoutDashboard, label: 'Dashboard',       to: '/dashboard' },
+  { icon: Globe,           label: 'Monitored Pages', to: '/pages' },
+  { icon: Bell,            label: 'Notifications',   to: '/notifications' },
+  { icon: Search,          label: 'Search',          to: '/search' },
+  { icon: BarChart3,       label: 'Statistics',      to: '/statistics' },
+  { icon: Settings,        label: 'Settings',        to: '/settings' },
 ];
 
 export function Sidebar() {
