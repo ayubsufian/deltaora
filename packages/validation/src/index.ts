@@ -82,6 +82,12 @@ export const checkPasswordRules = (
 
 /**
  * Returns a strength score 0–4 and a label for use in the UI strength meter.
+ *
+ * Scoring is NIST SP 800-63B aligned:
+ *   - Any policy violation → immediately Weak (score 1)
+ *   - Length is the PRIMARY entropy signal
+ *   - Complexity (mixed case, digits, symbols) is a SECONDARY bonus only
+ *   - A long passphrase without symbols can still reach Strong
  */
 export const getPasswordStrength = (
   password: string,
@@ -89,19 +95,30 @@ export const getPasswordStrength = (
 ): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } => {
   if (!password) return { score: 0, label: '', color: '' };
 
+  // Any policy violation → Weak immediately
   const errors = validatePasswordLocally(password, context);
   if (errors.length > 0) return { score: 1, label: 'Weak', color: 'bg-red-500' };
 
+  // Length tiers: primary entropy signal (NIST recommendation)
   let score = 0;
-  if (password.length >= 15) score++;
-  if (password.length >= 24) score++;
-  if (/[A-Z]/.test(password) && /[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
+  if (password.length >= 15) score += 2;  // meets minimum → starts at Fair
+  if (password.length >= 20) score++;     // longer → Good base
+  if (password.length >= 28) score++;     // very long passphrase → Strong base
 
-  if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-red-500' };
-  if (score === 2) return { score: 2, label: 'Fair', color: 'bg-orange-400' };
-  if (score === 3) return { score: 3, label: 'Good', color: 'bg-yellow-400' };
-  return { score: 4, label: 'Strong', color: 'bg-green-500' };
+  // Complexity bonuses (secondary — each worth half a tier)
+  let complexityBonus = 0;
+  if (/[A-Z]/.test(password)) complexityBonus++;
+  if (/[0-9]/.test(password)) complexityBonus++;
+  if (/[^A-Za-z0-9]/.test(password)) complexityBonus++;
+  // 2+ complexity factors = +1 to score
+  if (complexityBonus >= 2) score++;
+
+  const clamped = Math.min(score, 4) as 0 | 1 | 2 | 3 | 4;
+
+  if (clamped <= 1) return { score: 1, label: 'Weak',   color: 'bg-red-500' };
+  if (clamped === 2) return { score: 2, label: 'Fair',   color: 'bg-orange-400' };
+  if (clamped === 3) return { score: 3, label: 'Good',   color: 'bg-yellow-400' };
+  return               { score: 4, label: 'Strong', color: 'bg-green-500' };
 };
 
 export const registerSchema = z.object({
