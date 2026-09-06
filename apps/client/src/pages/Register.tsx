@@ -87,18 +87,34 @@ export function Register() {
   // Local policy checks for the checklist UI — typed, no string matching
   const rules = checkPasswordRules(password, { email, name });
 
+  const REGISTRATION_MESSAGE = "If this email isn't already registered, you'll receive a confirmation email shortly.";
+
   const onSubmit = async (data: RegisterForm) => {
     try {
       const result = await registerUser(data.name, data.email, data.password, data.confirmPassword);
+
       if (result?.message) {
-        toast.success(result.message);
+        // 202: duplicate email — show same generic message, never reveal email exists
+        toast.success(REGISTRATION_MESSAGE);
         navigate('/login');
         return;
       }
-      toast.success('Account created! Please check your email to verify.');
+
+      // 201: new account created and session established
+      toast.success('Account created! Welcome to DeltaOra.');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to create account');
+      const serverMessage = error.response?.data?.error;
+
+      // If server sent a generic message on 202 but axios treated it oddly, still show generic
+      if (error.response?.status === 202) {
+        toast.success(REGISTRATION_MESSAGE);
+        navigate('/login');
+        return;
+      }
+
+      // Real errors (validation, server fault) — show actual message
+      toast.error(serverMessage || 'Failed to create account. Please try again.');
     }
   };
 
