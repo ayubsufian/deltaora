@@ -17,9 +17,10 @@ import { isEmailDeliveryError, validateEmailProvider } from './services/email.se
 
 const app = express();
 
-if (env.NODE_ENV === 'production') {
-  app.set('trust proxy', 1);
-}
+// Trust the first proxy hop in all environments.
+// Without this, req.ip resolves to the proxy/loopback IP (::1 in dev),
+// causing all users to share the same rate-limit counter.
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());

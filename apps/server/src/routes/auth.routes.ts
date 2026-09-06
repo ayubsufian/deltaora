@@ -22,27 +22,92 @@ import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middl
 import { issueCsrfToken } from '../middleware/csrf';
 import { registerSchema, loginSchema } from '@deltaora/validation';
 import rateLimit from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import { redis } from '../config/redis';
 import { z } from 'zod';
 
 const router = Router();
 
-// 2026 Standard: Strict rate limiting to prevent brute-force attacks
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
-  message: { error: 'Too many authentication attempts, please try again after 15 minutes' },
-  standardHeaders: true,
-  legacyHeaders: false,
+/**
+ * Creates a Redis-backed rate limiter with an isolated key prefix per endpoint.
+ * Each limiter has its own independent counter — limits on /register never
+ * affect /login or any other endpoint.
+ */
+function makeRedisLimiter(options: {
+  prefix: string;         // unique per endpoint — prevents counter bleed
+  windowMs: number;
+  max: number;
+  message: string;
+  keyGenerator?: (req: any) => string;
+}) {
+  return rateLimit({
+    windowMs: options.windowMs,
+    max: options.max,
+    standardHeaders: 'draft-8', // RateLimit header (2026 IETF draft standard)
+    legacyHeaders: false,
+    message: { error: options.message },
+    keyGenerator: options.keyGenerator ?? ((req) => req.ip ?? 'unknown'),
+    store: new RedisStore({
+      prefix: `rl:${options.prefix}:`,
+      sendCommand: (...args: string[]) => (redis as any).call(...args),
+    }),
+  });
+}
+
+// ── Per-endpoint limiters (all independent — no shared counters) ────────────
+
+// Registration: 5 attempts per IP per 15 min (account creation abuse prevention)
+const registerLimiter = makeRedisLimiter({
+  prefix: 'register',
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Too many registration attempts. Please try again in 15 minutes.',
 });
 
-/**
- * @swagger
- * tags:
- *   name: Auth
- *   description: Authentication endpoints
- */
+// Login (by IP): 20 attempts per IP per 15 min — allows real users to mistype
+// without getting locked out, while still blocking automated spraying.
+const loginIpLimiter = makeRedisLimiter({
+  prefix: 'login_ip',
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many login attempts. Please try again in 15 minutes.',
+});
 
-router.post('/register', authLimiter, validate(registerSchema), register);
+// Login (by target email): 10 attempts per account per 15 min — stops
+// distributed brute-force from many IPs targeting a single account.
+const loginEmailLimiter = makeRedisLimiter({
+  prefix: 'login_email',
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many login attempts for this account. Please try again in 15 minutes.',
+  keyGenerator: (req) => `${req.body?.email ?? 'unknown'}`,
+});
+
+// Forgot password: 3 per IP per hour (strict — unauthenticated enumeration vector)
+const forgotPasswordLimiter = makeRedisLimiter({
+  prefix: 'forgot_pw',
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  message: 'Too many password reset requests. Please try again in an hour.',
+});
+
+// Reset password: 5 per IP per 15 min (token already required, so slightly looser)
+const resetPasswordLimiter = makeRedisLimiter({
+  prefix: 'reset_pw',
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: 'Too many password reset attempts. Please try again in 15 minutes.',
+});
+
+// Passkey authentication: 10 per IP per 15 min
+const passkeyLimiter = makeRedisLimiter({
+  prefix: 'passkey_auth',
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many passkey authentication attempts. Please try again in 15 minutes.',
+});
+
+router.post('/register', registerLimiter, validate(registerSchema), register);
 router.get('/csrf', issueCsrfToken);
 
 // Accept optional mfaCode for 2FA
@@ -50,7 +115,7 @@ const mfaLoginSchema = loginSchema.extend({
   mfaCode: z.string().optional(),
   recoveryCode: z.string().optional()
 });
-router.post('/login', authLimiter, validate(mfaLoginSchema), login);
+router.post('/login', loginIpLimiter, loginEmailLimiter, validate(mfaLoginSchema), login);
 
 /**
  * @swagger
@@ -92,8 +157,8 @@ router.post('/step-up', requireAuth, validate(z.object({
 })), stepUp);
 
 // ── Account Recovery ──
-router.post('/forgot-password', authLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);
-router.post('/reset-password', authLimiter, validate(z.object({ token: z.string(), newPassword: z.string().min(15).max(1024) })), resetPassword);
+router.post('/forgot-password', forgotPasswordLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);
+router.post('/reset-password', resetPasswordLimiter, validate(z.object({ token: z.string(), newPassword: z.string().min(15).max(1024) })), resetPassword);
 
 // ── Email Verification & Google Auth ──
 router.post('/send-verification', requireAuth, sendVerificationEmail);
@@ -112,13 +177,13 @@ router.post(
 );
 router.post(
   '/passkeys/authenticate/options',
-  authLimiter,
+  passkeyLimiter,
   validate(z.object({ email: z.string().email() })),
   startPasskeyAuthentication
 );
 router.post(
   '/passkeys/authenticate/verify',
-  authLimiter,
+  passkeyLimiter,
   validate(z.object({ credential: z.any() })),
   verifyPasskeyAuthentication
 );
