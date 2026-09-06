@@ -21,7 +21,7 @@ import { validate } from '../middleware/validate';
 import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { issueCsrfToken } from '../middleware/csrf';
 import { registerSchema, loginSchema } from '@deltaora/validation';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redis } from '../config/redis';
 import { z } from 'zod';
@@ -32,6 +32,9 @@ const router = Router();
  * Creates a Redis-backed rate limiter with an isolated key prefix per endpoint.
  * Each limiter has its own independent counter — limits on /register never
  * affect /login or any other endpoint.
+ *
+ * IP-based limiters use express-rate-limit's ipKeyGenerator helper which
+ * correctly normalises IPv6 addresses to prevent bypass via address variants.
  */
 function makeRedisLimiter(options: {
   prefix: string;         // unique per endpoint — prevents counter bleed
@@ -46,7 +49,9 @@ function makeRedisLimiter(options: {
     standardHeaders: 'draft-8', // RateLimit header (2026 IETF draft standard)
     legacyHeaders: false,
     message: { error: options.message },
-    keyGenerator: options.keyGenerator ?? ((req) => req.ip ?? 'unknown'),
+    // ipKeyGenerator normalises IPv6 (e.g. ::ffff:1.2.3.4 → 1.2.3.4) so
+    // users cannot bypass limits by switching between address formats.
+    keyGenerator: options.keyGenerator ?? ((req) => ipKeyGenerator(req)),
     store: new RedisStore({
       prefix: `rl:${options.prefix}:`,
       sendCommand: (...args: string[]) => (redis as any).call(...args),
