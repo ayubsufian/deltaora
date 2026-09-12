@@ -51,7 +51,7 @@ function makeRedisLimiter(options: {
     message: { error: options.message },
     // ipKeyGenerator normalises IPv6 (e.g. ::ffff:1.2.3.4 → 1.2.3.4) so
     // users cannot bypass limits by switching between address formats.
-    keyGenerator: options.keyGenerator ?? ((req) => ipKeyGenerator(req)),
+    keyGenerator: options.keyGenerator ?? ((req) => ipKeyGenerator(req.ip ?? 'unknown')),
     store: new RedisStore({
       prefix: `rl:${options.prefix}:`,
       sendCommand: (...args: string[]) => (redis as any).call(...args),
