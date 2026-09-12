@@ -46,7 +46,7 @@ function makeRedisLimiter(options: {
   return rateLimit({
     windowMs: options.windowMs,
     max: options.max,
-    standardHeaders: 'draft-8', // RateLimit header (2026 IETF draft standard)
+    standardHeaders: true, // RateLimit / RateLimit-Policy headers (RFC 9110 / draft-7)
     legacyHeaders: false,
     message: { error: options.message },
     // ipKeyGenerator normalises IPv6 (e.g. ::ffff:1.2.3.4 → 1.2.3.4) so
