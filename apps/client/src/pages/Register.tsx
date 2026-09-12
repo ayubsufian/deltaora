@@ -8,7 +8,7 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
 import { GoogleLogin } from '@react-oauth/google';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type RegisterForm = z.infer<typeof registerSchema>;
@@ -104,8 +104,6 @@ export function Register() {
       toast.success('Account created! Welcome to DeltaOra.');
       navigate('/dashboard');
     } catch (error: any) {
-      const serverMessage = error.response?.data?.error;
-
       // If server sent a generic message on 202 but axios treated it oddly, still show generic
       if (error.response?.status === 202) {
         toast.success(REGISTRATION_MESSAGE);
@@ -113,8 +111,12 @@ export function Register() {
         return;
       }
 
-      // Real errors (validation, server fault) — show actual message
-      toast.error(serverMessage || 'Failed to create account. Please try again.');
+      // Show the most specific message available:
+      // details[0] gives the exact reason (e.g. "password appeared in known data breaches")
+      // falling back to the top-level error, then a generic fallback
+      const details: string[] = error.response?.data?.details ?? [];
+      const message = details[0] || error.response?.data?.error || 'Failed to create account. Please try again.';
+      toast.error(message);
     }
   };
 
@@ -201,6 +203,11 @@ export function Register() {
                 <RuleRow passed={rules.notCommon}        label="Not a commonly used password" />
                 <RuleRow passed={rules.notContainsEmail} label="Doesn't contain your email address" />
                 <RuleRow passed={rules.notContainsName}  label="Doesn't contain your name" />
+                {/* Breach check cannot run in the browser — show as a permanent pending note */}
+                <li className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+                  <Shield className="h-3.5 w-3.5 flex-shrink-0" />
+                  Verified against known data breaches on submit
+                </li>
               </ul>
             )}
           </div>
