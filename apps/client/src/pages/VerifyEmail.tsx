@@ -10,7 +10,7 @@ export function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const navigate = useNavigate();
-  const { user, updateUser } = useAuth();
+  const { user } = useAuth();
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -25,10 +25,7 @@ export function VerifyEmail() {
     const verify = async () => {
       try {
         await api.post('/auth/verify-email', { token });
-        if (user) updateUser({ ...user, isEmailVerified: true });
         setStatus('success');
-        // Do NOT auto-redirect — show the success screen so the user can see it.
-        // They can navigate themselves via the button below.
       } catch (err: any) {
         setStatus('error');
         setErrorMsg(err.response?.data?.error || 'Failed to verify email. The link may have expired.');
@@ -36,7 +33,15 @@ export function VerifyEmail() {
     };
 
     verify();
-  }, [token]); // `user` intentionally excluded — user state changing must not re-fire this
+  }, [token]);
+
+  // Hard reload when navigating to dashboard so AuthContext re-runs its
+  // restore() → POST /auth/refresh flow, fetching the updated user from
+  // the database where isEmailVerified is now true.
+  // Using navigate() would keep the stale in-memory user and show the banner.
+  const handleGoToDashboard = () => {
+    window.location.href = '/dashboard';
+  };
 
   return (
     <div className="flex-1 w-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
@@ -58,12 +63,15 @@ export function VerifyEmail() {
               <p className="text-center text-gray-600 dark:text-gray-400">
                 Your email has been verified successfully!
               </p>
-              <Button
-                onClick={() => navigate(user ? '/dashboard' : '/login')}
-                className="mt-4"
-              >
-                {user ? 'Go to Dashboard' : 'Go to Login'}
-              </Button>
+              {user ? (
+                <Button onClick={handleGoToDashboard} className="mt-4">
+                  Go to Dashboard
+                </Button>
+              ) : (
+                <Button onClick={() => navigate('/login')} className="mt-4">
+                  Go to Login
+                </Button>
+              )}
             </>
           )}
 
