@@ -49,9 +49,24 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     const requestUrl = originalRequest?.url || '';
-    const isRefreshRequest = requestUrl.endsWith('/auth/refresh');
 
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isRefreshRequest) {
+    // Never attempt a refresh-and-retry for auth endpoints:
+    // a 401 from /auth/login, /auth/register, /auth/google, etc. means
+    // wrong credentials — not an expired session — so retrying after a
+    // refresh serves no purpose and causes the error to be silently swallowed.
+    const isAuthEndpoint =
+      requestUrl.endsWith('/auth/refresh') ||
+      requestUrl.endsWith('/auth/login') ||
+      requestUrl.endsWith('/auth/register') ||
+      requestUrl.endsWith('/auth/google') ||
+      requestUrl.includes('/auth/passkeys/');
+
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry &&
+      !isAuthEndpoint
+    ) {
       originalRequest._retry = true;
       try {
         const csrfToken = await ensureCsrfToken();
@@ -60,12 +75,13 @@ api.interceptors.response.use(
           headers: csrfToken ? { 'x-csrf-token': csrfToken } : undefined,
         });
         return api(originalRequest);
-      } catch (refreshError) {
-        // Handle logout or redirect to login
+      } catch {
+        // Refresh failed — session is truly gone, send to login
         window.location.href = '/login';
-        return Promise.reject(refreshError);
+        return Promise.reject(error); // reject with ORIGINAL error so callers get context
       }
     }
+
     return Promise.reject(error);
   }
 );
