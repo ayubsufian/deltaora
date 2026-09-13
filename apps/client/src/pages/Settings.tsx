@@ -893,7 +893,47 @@ export function Settings() {
           <CardContent className="space-y-4 pt-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <Input label="Name" value={profileName} onChange={event => setProfileName(event.target.value)} />
-              <Input label="Email" type="email" value={profileEmail} onChange={event => setProfileEmail(event.target.value)} />
+              <div className="space-y-1.5">
+                <Input label="Email" type="email" value={profileEmail} onChange={event => setProfileEmail(event.target.value)} />
+                {/* Verification status badge — shown below the email field */}
+                {user?.isEmailVerified ? (
+                  <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                    </svg>
+                    Verified
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                      </svg>
+                      Not verified — check your inbox
+                    </p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await api.post('/auth/send-verification');
+                          toast.success('Verification email sent');
+                        } catch {
+                          toast.error('Failed to send verification email');
+                        }
+                      }}
+                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors shrink-0"
+                    >
+                      Resend
+                    </button>
+                  </div>
+                )}
+                {/* Warn that changing email requires re-verification */}
+                {profileEmail !== user?.email && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Changing your email will require re-verification.
+                  </p>
+                )}
+              </div>
             </div>
             <div className="flex justify-end">
               <Button onClick={saveProfile} isLoading={isSaving} disabled={!profileName.trim() || !profileEmail.trim()}>
