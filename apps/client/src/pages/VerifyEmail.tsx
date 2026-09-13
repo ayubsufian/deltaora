@@ -38,7 +38,7 @@ export function VerifyEmail() {
   }, [token]); // `user` intentionally excluded — user state changing must not re-fire this
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+    <div className="flex-1 w-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle>Email Verification</CardTitle>

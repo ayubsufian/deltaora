@@ -22,11 +22,19 @@
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
   background-color: #f9fafb;
+}
+
+/* Ensure the React root stretches to fill the full viewport so every
+   route's top-level element (AuthLayout, DashboardLayout, VerifyEmail, etc.)
+   can reliably use h-screen / min-h-screen without being clipped. */
+#root {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .dark body {
