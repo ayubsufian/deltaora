@@ -10,7 +10,7 @@ export function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -25,6 +25,7 @@ export function VerifyEmail() {
     const verify = async () => {
       try {
         await api.post('/auth/verify-email', { token });
+        if (user) updateUser({ ...user, isEmailVerified: true });
         setStatus('success');
         // Do NOT auto-redirect — show the success screen so the user can see it.
         // They can navigate themselves via the button below.
