@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import api from '../lib/axios';
 import { useAuth } from '../contexts/AuthContext';
-import toast from 'react-hot-toast';
 import { CheckCircle, XCircle } from 'lucide-react';
 
 export function VerifyEmail() {
@@ -15,25 +14,20 @@ export function VerifyEmail() {
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const hasFired = useRef(false);
+
   useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setErrorMsg('No verification token provided in the URL.');
-      return;
-    }
+    // Guard against double-invocation in React StrictMode and re-fires caused
+    // by `user` changing after a successful verify triggers an AuthContext refresh.
+    if (!token || hasFired.current) return;
+    hasFired.current = true;
 
     const verify = async () => {
       try {
         await api.post('/auth/verify-email', { token });
         setStatus('success');
-        
-        // If the user is currently logged in, force a reload to get new token/state
-        if (user) {
-          toast.success('Email verified successfully! Reloading...');
-          setTimeout(() => {
-            window.location.href = '/dashboard';
-          }, 1500);
-        }
+        // Do NOT auto-redirect — show the success screen so the user can see it.
+        // They can navigate themselves via the button below.
       } catch (err: any) {
         setStatus('error');
         setErrorMsg(err.response?.data?.error || 'Failed to verify email. The link may have expired.');
@@ -41,7 +35,7 @@ export function VerifyEmail() {
     };
 
     verify();
-  }, [token, user]);
+  }, [token]); // `user` intentionally excluded — user state changing must not re-fire this
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
@@ -63,11 +57,12 @@ export function VerifyEmail() {
               <p className="text-center text-gray-600 dark:text-gray-400">
                 Your email has been verified successfully!
               </p>
-              {!user && (
-                <Button onClick={() => navigate('/login')} className="mt-4">
-                  Go to Login
-                </Button>
-              )}
+              <Button
+                onClick={() => navigate(user ? '/dashboard' : '/login')}
+                className="mt-4"
+              >
+                {user ? 'Go to Dashboard' : 'Go to Login'}
+              </Button>
             </>
           )}
 
