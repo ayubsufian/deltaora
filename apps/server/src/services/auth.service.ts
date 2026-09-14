@@ -174,7 +174,10 @@ export const revokeAllUserSessions = async (userId: string, reason: string) => {
     { $set: { revokedAt: new Date(), revokedReason: reason } }
   );
   if (sessions.length > 0) {
-    await redis.del(...sessions.map(session => `refresh_token:${session.id}`));
+    // Use pipeline instead of spread args — safe for any number of sessions
+    const pipeline = redis.pipeline();
+    sessions.forEach(session => pipeline.del(`refresh_token:${session.id}`));
+    await pipeline.exec();
   }
 };
 

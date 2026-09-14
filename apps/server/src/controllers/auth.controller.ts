@@ -25,7 +25,7 @@ import {
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { sendEmail } from '../services/email.service';
-import { welcomeEmail, passwordResetEmail, verificationEmail } from '../utils/emailTemplates';
+import { welcomeEmail, passwordResetEmail, verificationEmail, sessionReuseAlertEmail } from '../utils/emailTemplates';
 import { logAuthEvent } from '../services/audit.service';
 import { OTP } from 'otplib';
 import QRCode from 'qrcode';
@@ -264,20 +264,40 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
     });
 
     if (isValidInRedis !== refreshTokenHash || !session) {
-      const suspiciousSession = await UserSession.findOne({
+      // Look for any session with this ID — revoked or not.
+      // A replayed token against a revoked session is still a detection signal
+      // worth logging per RFC 9700 §4.13.2.
+      const anySession = await UserSession.findOne({
         _id: decoded.sessionId,
         userId: decoded.userId,
-        revokedAt: { $exists: false },
-      }).select('_id');
+      }).populate<{ userId: { email: string; name: string } }>('userId', 'email name');
 
-      if (suspiciousSession) {
+      if (anySession) {
+        // Revoke all remaining live sessions (in case they weren't already)
         await revokeAllUserSessions(decoded.userId, 'refresh_token_reuse_detected');
         await logAuthEvent('auth.refresh_reuse_detected', {
           actorId: decoded.userId,
-          metadata: { sessionId: decoded.sessionId },
+          metadata: {
+            sessionId: decoded.sessionId,
+            alreadyRevoked: !!anySession.revokedAt,
+          },
           req,
         });
+
+        // Notify the user by email — fire-and-forget so slow email never delays 401
+        const user = await User.findById(decoded.userId).select('email name');
+        if (user) {
+          const resetToken = Math.random().toString(36).slice(2); // placeholder — real flow uses forgot-password
+          const resetUrl = `${env.CLIENT_URL}/forgot-password`;
+          const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+          sendEmail({
+            to: user.email,
+            subject: 'Deltaora Security Alert — All Sessions Signed Out',
+            htmlContent: sessionReuseAlertEmail(ip, resetUrl, env.CLIENT_URL),
+          }).catch(() => {}); // non-blocking: never let email failure affect the response
+        }
       }
+
       return res.status(401).json({ error: 'Unauthorized: Session expired or revoked' });
     }
 

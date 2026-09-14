@@ -161,3 +161,35 @@ export const verificationEmail = (verificationUrl: string, baseUrl: string) => b
     <a href="${verificationUrl}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Verify Email</a>
   </div>
 `, baseUrl);
+
+/**
+ * Security alert email sent when a refresh token reuse attack is detected.
+ * All sessions are force-revoked and the user is notified per RFC 9700 §4.13.2.
+ */
+export const sessionReuseAlertEmail = (
+  ipAddress: string,
+  resetUrl: string,
+  baseUrl: string
+): string => baseLayout(`
+  <div style="background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px;">
+    <p style="margin: 0; font-size: 15px; font-weight: 700; color: #b91c1c;">⚠️ Security alert — all sessions signed out</p>
+  </div>
+  <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #1f2937;">
+    We detected that a previously used sign-in token for your account was replayed from IP address
+    <strong>${escapeHtml(ipAddress)}</strong>. This is a sign that your session token may have been stolen.
+  </p>
+  <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #1f2937;">
+    As a precaution, <strong>all active sessions on your account have been immediately signed out</strong>.
+    You will need to sign in again on every device.
+  </p>
+  <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #1f2937;">
+    If this was you (for example, you replayed a request yourself for testing), you can safely sign in again.
+    If you did not do this, we recommend resetting your password immediately:
+  </p>
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="${escapeHtml(resetUrl)}" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Reset Password</a>
+  </div>
+  <p style="margin: 0; font-size: 13px; color: #6b7280;">
+    If you did not request a password reset, you can safely ignore this email. This alert was triggered automatically.
+  </p>
+`, baseUrl, { showUnsubscribe: false });
