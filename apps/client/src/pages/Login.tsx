@@ -35,11 +35,24 @@ export function Login() {
       navigate('/dashboard');
     } catch (error: any) {
       const errRes = error.response?.data;
+      const status = error.response?.status;
+
       if (errRes?.error === 'MFA_REQUIRED') {
         setRequiresMfa(true);
         toast('Multi-factor authentication required', { icon: '🔐' });
+      } else if (status === 429) {
+        // Account lockout (has retryAfterSeconds) vs IP rate limit (does not)
+        if (errRes?.retryAfterSeconds) {
+          const minutes = Math.ceil(errRes.retryAfterSeconds / 60);
+          toast.error(
+            `Account locked. Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'} or reset your password.`,
+            { duration: 8000 }
+          );
+        } else {
+          toast.error('Too many login attempts. Please wait 15 minutes and try again.', { duration: 8000 });
+        }
       } else {
-        toast.error(errRes?.message || errRes?.error || 'Invalid email or password');
+        toast.error(errRes?.error || 'Invalid email or password');
       }
     }
   };

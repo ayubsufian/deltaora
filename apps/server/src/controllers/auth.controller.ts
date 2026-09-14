@@ -179,7 +179,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     if (user.lockoutUntil && user.lockoutUntil > new Date()) {
       await logAuthEvent('auth.login_blocked', { actorId: user.id, metadata: { reason: 'locked' }, req });
-      return res.status(429).json({ error: 'Account temporarily locked. Use password reset or try again later.' });
+      const retryAfterSeconds = Math.ceil((user.lockoutUntil.getTime() - Date.now()) / 1000);
+      return res
+        .status(429)
+        .set('Retry-After', String(retryAfterSeconds)) // RFC 6585 §4 — required with 429
+        .json({
+          error: 'Account temporarily locked due to too many failed attempts.',
+          retryAfterSeconds,
+        });
     }
 
     if (!user.passwordHash) {
