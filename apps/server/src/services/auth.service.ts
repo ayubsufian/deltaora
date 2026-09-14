@@ -10,7 +10,8 @@ const production = env.NODE_ENV === 'production';
 export const ACCESS_TOKEN_COOKIE = production ? '__Host-deltaora-access' : 'deltaora.accessToken';
 export const REFRESH_TOKEN_COOKIE = production ? '__Host-deltaora-refresh' : 'deltaora.refreshToken';
 export const CSRF_COOKIE = production ? '__Host-deltaora-csrf' : 'deltaora.csrfToken';
-const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+// Default: 15 min. Override in .env with ACCESS_TOKEN_TTL_SECONDS=30 for testing.
+const ACCESS_TOKEN_TTL_SECONDS = Number(process.env.ACCESS_TOKEN_TTL_SECONDS) || 15 * 60;
 const REFRESH_TOKEN_IDLE_TTL_SECONDS = 12 * 60 * 60;
 const REFRESH_TOKEN_ABSOLUTE_TTL_SECONDS = 30 * 24 * 60 * 60;
 export const STEP_UP_TTL_MS = 10 * 60 * 1000;
