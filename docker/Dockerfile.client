@@ -12,7 +12,7 @@ ARG VITE_GOOGLE_CLIENT_ID
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 
 # Copy root config files
-COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 
 # Copy package sources
 COPY packages/ packages/
@@ -20,6 +20,7 @@ COPY apps/client/ apps/client/
 
 # Install dependencies and build
 RUN pnpm install --filter=@deltaora/client...
+RUN test -n "$VITE_GOOGLE_CLIENT_ID" || (echo "VITE_GOOGLE_CLIENT_ID build arg is required for the frontend image" >&2; exit 1)
 RUN pnpm --filter=@deltaora/client build
 
 FROM nginx:alpine
