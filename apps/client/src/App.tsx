@@ -14,10 +14,17 @@ import { JoinWorkspace } from './pages/JoinWorkspace';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { ResetPassword } from './pages/ResetPassword';
 import { VerifyEmail } from './pages/VerifyEmail';
+import { Home } from './pages/Home';
+import { Privacy } from './pages/Privacy';
+import { Terms } from './pages/Terms';
 
 function App() {
   return (
     <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
+
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -36,8 +43,8 @@ function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/statistics" element={<Statistics />} />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

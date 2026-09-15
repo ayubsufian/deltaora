@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { ThemeToggle } from '../ui/ThemeToggle';
 import { Shield, FileSearch, BarChart3, Users, Sparkles, Lock } from 'lucide-react';
 
@@ -132,20 +132,24 @@ export function AuthLayout() {
 
         {/* Bottom trust bar */}
         <div className="px-6 pb-6 lg:px-12">
-          <div className="flex items-center justify-center gap-6 text-xs text-gray-400 dark:text-gray-600">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-gray-400 dark:text-gray-600">
             <span className="flex items-center gap-1.5">
               <Lock className="h-3 w-3" />
               256-bit encryption
             </span>
-            <span className="hidden sm:inline text-gray-300 dark:text-gray-700">·</span>
             <span className="hidden sm:flex items-center gap-1.5">
               <Shield className="h-3 w-3" />
               SOC2-ready
             </span>
-            <span className="hidden sm:inline text-gray-300 dark:text-gray-700">·</span>
             <span className="hidden sm:flex items-center gap-1.5">
               GDPR compliant
             </span>
+            <Link to="/privacy" className="font-medium hover:text-gray-600 dark:hover:text-gray-300">
+              Privacy
+            </Link>
+            <Link to="/terms" className="font-medium hover:text-gray-600 dark:hover:text-gray-300">
+              Terms
+            </Link>
           </div>
         </div>
       </div>

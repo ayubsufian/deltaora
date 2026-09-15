@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Globe, Bell, Search, BarChart3, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -77,6 +77,14 @@ export function Sidebar() {
           >
             <LogOut className="h-5 w-5" />
           </button>
+        </div>
+        <div className="mt-3 flex items-center gap-4 px-3 text-xs text-gray-400 dark:text-gray-600">
+          <Link to="/privacy" className="hover:text-gray-700 dark:hover:text-gray-300">
+            Privacy
+          </Link>
+          <Link to="/terms" className="hover:text-gray-700 dark:hover:text-gray-300">
+            Terms
+          </Link>
         </div>
       </div>
     </aside>
