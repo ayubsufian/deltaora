@@ -8,6 +8,9 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 WORKDIR /app
 
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+
 # Copy root config files
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 

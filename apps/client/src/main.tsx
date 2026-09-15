@@ -19,7 +19,11 @@ const queryClient = new QueryClient({
   },
 })
 
-const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || 'mock_client_id';
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+if (!googleClientId) {
+  throw new Error('Missing VITE_GOOGLE_CLIENT_ID. Set it in the repo root .env file and restart the client dev server.');
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
