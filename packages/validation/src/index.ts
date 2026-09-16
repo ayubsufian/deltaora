@@ -150,6 +150,23 @@ export const registerSchema = z.object({
   }
 });
 
+export const resetPasswordSchema = z.object({
+  password: z.string()
+    .min(APP_CONFIG.PASSWORD_MIN_LENGTH, `Password must be at least ${APP_CONFIG.PASSWORD_MIN_LENGTH} characters`)
+    .max(APP_CONFIG.PASSWORD_MAX_LENGTH, 'Password is too long'),
+  confirmPassword: z.string(),
+}).superRefine((data, ctx) => {
+  const rules = checkPasswordRules(data.password);
+
+  if (!rules.notCommon) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Choose a less common password.', path: ['password'] });
+  }
+
+  if (data.password !== data.confirmPassword) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Passwords don't match", path: ['confirmPassword'] });
+  }
+});
+
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
@@ -270,6 +287,7 @@ export const updatePageSchema = createPageSchema.partial();
 
 // Inferred types for consumer convenience
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreatePageInput = z.infer<typeof createPageSchema>;
 export type UpdatePageInput = z.infer<typeof updatePageSchema>;

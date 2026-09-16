@@ -1,45 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useForm, useWatch } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { resetPasswordSchema } from '@deltaora/validation';
+import { z } from 'zod';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import api from '../lib/axios';
+import { PasswordGuidance } from '../components/auth/PasswordGuidance';
+
+type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 
 export function ResetPassword() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   
   const navigate = useNavigate();
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const {
+    register,
+    handleSubmit,
+    setError,
+    control,
+    formState: { errors, isSubmitting },
+  } = useForm<ResetPasswordForm>({
+    resolver: zodResolver(resetPasswordSchema),
+    mode: 'onChange',
+  });
+  const password = useWatch({ control, name: 'password', defaultValue: '' });
 
   useEffect(() => {
     if (!token) {
-      setError('Invalid or missing password reset token.');
+      setError('root', { message: 'Invalid or missing password reset token.' });
     }
-  }, [token]);
+  }, [setError, token]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirmPassword) {
-      return setError('Passwords do not match');
-    }
-    if (password.length < 15) {
-      return setError('Password must be at least 15 characters long');
-    }
-
-    setIsSubmitting(true);
-    setError('');
-
+  const onSubmit = async (data: ResetPasswordForm) => {
     try {
-      await api.post('/auth/reset-password', { token, newPassword: password });
+      await api.post('/auth/reset-password', { token, newPassword: data.password });
       navigate('/login', { state: { message: 'Password has been successfully reset. You may now log in.' } });
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to reset password. The link may have expired.');
-    } finally {
-      setIsSubmitting(false);
+      const details: string[] = err.response?.data?.details ?? [];
+      setError('root', {
+        message: details[0] || err.response?.data?.error || 'Failed to reset password. The link may have expired.',
+      });
     }
   };
 
@@ -52,29 +56,35 @@ export function ResetPassword() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {error && (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          {errors.root?.message && (
             <div className="p-3.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 rounded-lg text-sm border border-red-200 dark:border-red-900">
-              {error}
+              {errors.root.message}
             </div>
           )}
-          <Input
-            label="New Password"
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <div className="space-y-3">
+            <Input
+              label="New Password"
+              type="password"
+              placeholder="••••••••"
+              autoComplete="new-password"
+              {...register('password')}
+              error={errors.password?.message}
+              required
+            />
+
+            <PasswordGuidance password={password} includeAccountContext />
+          </div>
           <Input
             label="Confirm New Password"
             type="password"
             placeholder="••••••••"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            {...register('confirmPassword')}
+            error={errors.confirmPassword?.message}
             required
           />
-          <Button type="submit" className="w-full" isLoading={isSubmitting} disabled={!!error && !password}>
+          <Button type="submit" className="w-full" isLoading={isSubmitting} disabled={!token}>
             Reset Password
           </Button>
         </form>

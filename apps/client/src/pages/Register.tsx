@@ -1,69 +1,17 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { registerSchema, getPasswordStrength, checkPasswordRules } from '@deltaora/validation';
+import { registerSchema } from '@deltaora/validation';
 import { z } from 'zod';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../contexts/AuthContext';
 import { GoogleLogin } from '@react-oauth/google';
-import { CheckCircle2, XCircle, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { PasswordGuidance } from '../components/auth/PasswordGuidance';
 
 type RegisterForm = z.infer<typeof registerSchema>;
-
-// ── Password Rule Row ──────────────────────────────────────────────────────────
-function RuleRow({ passed, label }: { passed: boolean; label: string }) {
-  return (
-    <li className={`flex items-center gap-2 text-xs transition-colors duration-200 ${passed ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
-      {passed
-        ? <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
-        : <XCircle className="h-3.5 w-3.5 flex-shrink-0" />}
-      {label}
-    </li>
-  );
-}
-
-// ── Strength Meter Bar ─────────────────────────────────────────────────────────
-// Color classes MUST be defined here as literal strings so Tailwind's scanner
-// includes them in the compiled CSS. Strings returned from the validation package
-// (a different directory) are invisible to Tailwind and get purged.
-const STRENGTH_CONFIG = {
-  0: { bar: '',                label: ''                                   },
-  1: { bar: 'bg-red-500',      label: 'text-red-500'                       },
-  2: { bar: 'bg-orange-400',   label: 'text-orange-500'                    },
-  3: { bar: 'bg-yellow-400',   label: 'text-yellow-600 dark:text-yellow-400' },
-  4: { bar: 'bg-green-500',    label: 'text-green-600 dark:text-green-400' },
-} as const;
-
-function StrengthMeter({ password, email, name }: { password: string; email: string; name: string }) {
-  const strength = getPasswordStrength(password, { email, name });
-  if (!password || strength.score === 0) return null;
-
-  const config = STRENGTH_CONFIG[strength.score];
-  const segments = [1, 2, 3, 4] as const;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex gap-1.5">
-        {segments.map((seg) => (
-          <div
-            key={seg}
-            className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-              seg <= strength.score ? config.bar : 'bg-gray-200 dark:bg-gray-700'
-            }`}
-          />
-        ))}
-      </div>
-      {strength.label && (
-        <p className={`text-xs font-medium ${config.label}`}>
-          {strength.label}
-        </p>
-      )}
-    </div>
-  );
-}
 
 // ── Register Page ──────────────────────────────────────────────────────────────
 export function Register() {
@@ -83,9 +31,6 @@ export function Register() {
   const password = useWatch({ control, name: 'password', defaultValue: '' });
   const email    = useWatch({ control, name: 'email',    defaultValue: '' });
   const name     = useWatch({ control, name: 'name',     defaultValue: '' });
-
-  // Local policy checks for the checklist UI — typed, no string matching
-  const rules = checkPasswordRules(password, { email, name });
 
   const REGISTRATION_MESSAGE = "If this email isn't already registered, you'll receive a confirmation email shortly.";
 
@@ -168,6 +113,7 @@ export function Register() {
           <Input
             label="Name"
             placeholder="John Doe"
+            autoComplete="name"
             {...register('name')}
             error={errors.name?.message}
           />
@@ -177,6 +123,7 @@ export function Register() {
             label="Email"
             type="email"
             placeholder="you@example.com"
+            autoComplete="email"
             {...register('email')}
             error={errors.email?.message}
           />
@@ -187,29 +134,12 @@ export function Register() {
               label="Password"
               type="password"
               placeholder="••••••••"
+              autoComplete="new-password"
               {...register('password')}
               error={errors.password?.message}
             />
 
-            {/* Strength meter — only shows once the user starts typing */}
-            {password.length > 0 && (
-              <StrengthMeter password={password} email={email} name={name} />
-            )}
-
-            {/* Live rule checklist */}
-            {password.length > 0 && (
-              <ul className="space-y-1.5 pl-0.5">
-                <RuleRow passed={rules.hasMinLength}     label="At least 15 characters" />
-                <RuleRow passed={rules.notCommon}        label="Not a commonly used password" />
-                <RuleRow passed={rules.notContainsEmail} label="Doesn't contain your email address" />
-                <RuleRow passed={rules.notContainsName}  label="Doesn't contain your name" />
-                {/* Breach check cannot run in the browser — show as a permanent pending note */}
-                <li className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
-                  <Shield className="h-3.5 w-3.5 flex-shrink-0" />
-                  Verified against known data breaches on submit
-                </li>
-              </ul>
-            )}
+            <PasswordGuidance password={password} email={email} name={name} />
           </div>
 
           {/* Confirm Password */}
@@ -217,6 +147,7 @@ export function Register() {
             label="Confirm Password"
             type="password"
             placeholder="••••••••"
+            autoComplete="new-password"
             {...register('confirmPassword')}
             error={errors.confirmPassword?.message}
           />

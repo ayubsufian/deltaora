@@ -20,7 +20,7 @@ import {
 import { validate } from '../middleware/validate';
 import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { issueCsrfToken } from '../middleware/csrf';
-import { registerSchema, loginSchema } from '@deltaora/validation';
+import { passwordRules, registerSchema, loginSchema } from '@deltaora/validation';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redis } from '../config/redis';
@@ -163,7 +163,10 @@ router.post('/step-up', requireAuth, validate(z.object({
 
 // ── Account Recovery ──
 router.post('/forgot-password', forgotPasswordLimiter, validate(z.object({ email: z.string().email() })), forgotPassword);
-router.post('/reset-password', resetPasswordLimiter, validate(z.object({ token: z.string(), newPassword: z.string().min(15).max(1024) })), resetPassword);
+router.post('/reset-password', resetPasswordLimiter, validate(z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(passwordRules.minLength).max(passwordRules.maxLength),
+})), resetPassword);
 
 // ── Email Verification & Google Auth ──
 router.post('/send-verification', requireAuth, sendVerificationEmail);
