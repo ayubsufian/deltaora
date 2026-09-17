@@ -62,6 +62,7 @@ const WEBAUTHN_VERIFICATION_ERROR_PREFIXES = [
 
 const webAuthnOrigin = () => env.WEBAUTHN_ORIGIN || env.CLIENT_URL;
 const webAuthnRpId = () => env.WEBAUTHN_RP_ID || new URL(webAuthnOrigin()).hostname;
+const requireWebAuthnUserVerification = () => env.WEBAUTHN_USER_VERIFICATION === 'required';
 
 const isWebAuthnVerificationError = (error: any) => (
   error instanceof Error
@@ -686,7 +687,7 @@ export const startPasskeyRegistration = async (req: Request, res: Response, next
       })),
       authenticatorSelection: {
         residentKey: 'preferred',
-        userVerification: 'required',
+        userVerification: env.WEBAUTHN_USER_VERIFICATION,
       },
       timeout: 60_000,
     } as any);
@@ -715,7 +716,7 @@ export const verifyPasskeyRegistration = async (req: Request, res: Response, nex
       expectedChallenge,
       expectedOrigin: webAuthnOrigin(),
       expectedRPID: webAuthnRpId(),
-      requireUserVerification: true,
+      requireUserVerification: requireWebAuthnUserVerification(),
     } as any);
 
     if (!verification.verified || !verification.registrationInfo) {
@@ -771,7 +772,7 @@ export const startPasskeyAuthentication = async (req: Request, res: Response, ne
         id: credential.credentialId,
         transports: credential.transports as any,
       })),
-      userVerification: 'required',
+      userVerification: env.WEBAUTHN_USER_VERIFICATION,
       timeout: 60_000,
     } as any);
 
@@ -823,7 +824,7 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
           counter: credential.counter,
           transports: credential.transports as any,
         },
-        requireUserVerification: true,
+        requireUserVerification: requireWebAuthnUserVerification(),
       } as any);
     } catch (error: any) {
       if (!isWebAuthnVerificationError(error)) {
@@ -853,14 +854,15 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
     await credential.save();
     await redis.del(`webauthn:authentication:${credential.credentialId}`);
 
+    const userVerified = !!(verification.authenticationInfo as any).userVerified;
     const tokens = await generateTokens(user.id, user.role, req, undefined, {
       markReauthenticated: true,
-      markMfaVerified: true,
+      markMfaVerified: userVerified,
     });
     setAuthCookies(res, tokens);
     await logAuthEvent('auth.passkey_login_success', {
       actorId: user.id,
-      metadata: { credentialId: credential.credentialId },
+      metadata: { credentialId: credential.credentialId, userVerified },
       req,
     });
 

@@ -93,6 +93,9 @@ const envSchema = z.object({
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
   WEBAUTHN_RP_ID: z.string().optional(),
   WEBAUTHN_ORIGIN: z.string().url().optional(),
+  WEBAUTHN_USER_VERIFICATION: z.enum(['required', 'preferred', 'discouraged']).default(
+    resolvedEnv.NODE_ENV === 'production' ? 'required' : 'preferred'
+  ),
   PASSWORD_BREACH_SCREENING_MODE: z.enum(['api', 'local', 'disabled']).default('api'),
   PASSWORD_BREACH_SCREENING_FAILURE_POLICY: z.enum(['block', 'allow']).default('block'),
   PASSWORD_BREACH_SCREENING_TIMEOUT_MS: z.coerce.number().int().positive().max(10_000).default(3000),
@@ -146,6 +149,14 @@ const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['PASSWORD_BREACH_SCREENING_FAILURE_POLICY'],
       message: 'Production password breach screening must fail closed with PASSWORD_BREACH_SCREENING_FAILURE_POLICY=block',
+    });
+  }
+
+  if (value.NODE_ENV === 'production' && value.WEBAUTHN_USER_VERIFICATION !== 'required') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['WEBAUTHN_USER_VERIFICATION'],
+      message: 'Production passkey authentication must require user verification',
     });
   }
 
