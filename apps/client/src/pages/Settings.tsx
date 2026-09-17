@@ -10,7 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { startRegistration } from '@simplewebauthn/browser';
+import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -179,6 +179,34 @@ function errorMessage(error: unknown, fallback: string) {
   return err.response?.data?.details?.[0] || err.response?.data?.error || fallback;
 }
 
+function isStepUpRequired(error: unknown) {
+  const err = error as { response?: { status?: number; data?: { code?: string } } };
+  return err.response?.status === 403 && ['STEP_UP_REQUIRED', 'MFA_STEP_UP_REQUIRED'].includes(err.response.data?.code || '');
+}
+
+function passkeyRegistrationErrorMessage(error: unknown) {
+  const err = error as { name?: string; response?: { data?: { error?: string; details?: string[] } } };
+
+  if (err.response) {
+    return errorMessage(error, 'Passkey creation failed. Try again.');
+  }
+
+  switch (err.name) {
+    case 'InvalidStateError':
+      return 'This device may already have a passkey for this account.';
+    case 'NotAllowedError':
+      return 'Passkey creation was cancelled or timed out. Try again when you are ready.';
+    case 'NotSupportedError':
+      return 'This browser or device does not support passkey creation.';
+    case 'SecurityError':
+      return 'Passkeys require a secure connection and a matching site domain.';
+    case 'AbortError':
+      return 'Another passkey prompt is already in progress. Finish it or try again.';
+    default:
+      return 'Passkey creation failed. Try again.';
+  }
+}
+
 function formatDate(value?: string) {
   if (!value) return 'Never';
   return new Intl.DateTimeFormat(undefined, {
@@ -302,6 +330,8 @@ export function Settings() {
   const [crawlerSessions, setCrawlerSessions] = useState<CrawlerAuthSession[]>([]);
   const [passkeyName, setPasskeyName] = useState('');
   const [isPasskeyModalOpen, setIsPasskeyModalOpen] = useState(false);
+  const [isAddingPasskey, setIsAddingPasskey] = useState(false);
+  const [passkeyError, setPasskeyError] = useState('');
   const [renamePasskeyState, setRenamePasskeyState] = useState<{ id: string; name: string } | null>(null);
   const [stepUpRequest, setStepUpRequest] = useState<StepUpRequest | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
@@ -603,20 +633,64 @@ export function Settings() {
     }
   };
 
+  const openPasskeyModal = () => {
+    setPasskeyError('');
+    setIsPasskeyModalOpen(true);
+  };
+
+  const closePasskeyModal = () => {
+    if (isAddingPasskey) return;
+    setPasskeyError('');
+    setIsPasskeyModalOpen(false);
+  };
+
   const addPasskey = async () => {
+    if (isAddingPasskey) return;
+
+    if (!browserSupportsWebAuthn()) {
+      const message = 'This browser or device does not support passkey creation.';
+      setPasskeyError(message);
+      toast.error(message);
+      return;
+    }
+
+    setIsAddingPasskey(true);
+    setPasskeyError('');
+
     try {
-      await requestStepUp({ reason: 'Add a passkey' });
       const optionsRes = await api.post('/auth/passkeys/register/options');
+      setIsPasskeyModalOpen(false);
+      toast.loading('Follow your browser or device prompt to create the passkey.', { id: 'passkey-registration' });
       const credential = await startRegistration({ optionsJSON: optionsRes.data } as any);
+      toast.loading('Saving passkey...', { id: 'passkey-registration' });
       await api.post('/auth/passkeys/register/verify', { credential, name: passkeyName.trim() || 'Passkey' });
       setPasskeyName('');
       setIsPasskeyModalOpen(false);
-      toast.success('Passkey added');
+      toast.success('Passkey added', { id: 'passkey-registration' });
       fetchPasskeys();
     } catch (error) {
-      if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to add passkey'));
+      toast.dismiss('passkey-registration');
+
+      if (isStepUpRequired(error)) {
+        setIsPasskeyModalOpen(false);
+        try {
+          await requestStepUp({ reason: 'Add a passkey' });
+          setIsPasskeyModalOpen(true);
+          toast.success('Verified. Create the passkey to continue.');
+        } catch (stepUpError) {
+          if ((stepUpError as Error).message !== 'Step-up cancelled') {
+            toast.error(errorMessage(stepUpError, 'Verification failed'));
+          }
+        }
+        return;
       }
+
+      const message = passkeyRegistrationErrorMessage(error);
+      setPasskeyError(message);
+      setIsPasskeyModalOpen(true);
+      toast.error(message);
+    } finally {
+      setIsAddingPasskey(false);
     }
   };
 
@@ -1172,7 +1246,7 @@ export function Settings() {
                   <div className="font-medium text-gray-950 dark:text-white">Passkeys</div>
                   <p className="text-sm text-gray-500">Use device-bound or synced passkeys where supported.</p>
                 </div>
-                <Button variant="outline" onClick={() => setIsPasskeyModalOpen(true)}>
+                <Button variant="outline" onClick={openPasskeyModal}>
                   <KeyRound className="mr-2 h-4 w-4" /> Add
                 </Button>
               </div>
@@ -1441,12 +1515,31 @@ export function Settings() {
         </div>
       </Modal>
 
-      <Modal isOpen={isPasskeyModalOpen} onClose={() => setIsPasskeyModalOpen(false)} title="Add passkey">
+      <Modal
+        isOpen={isPasskeyModalOpen}
+        onClose={closePasskeyModal}
+        title="Add passkey"
+        description="Create a passkey with your browser, device, or password manager."
+      >
         <div className="space-y-4">
-          <Input label="Passkey name" value={passkeyName} onChange={event => setPasskeyName(event.target.value)} placeholder="Work laptop" />
+          <Input
+            label="Passkey name"
+            value={passkeyName}
+            onChange={event => {
+              setPasskeyName(event.target.value);
+              setPasskeyError('');
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') addPasskey();
+            }}
+            placeholder="Work laptop"
+            maxLength={80}
+            error={passkeyError}
+            autoFocus
+          />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setIsPasskeyModalOpen(false)}>Cancel</Button>
-            <Button onClick={addPasskey}>Create passkey</Button>
+            <Button variant="outline" onClick={closePasskeyModal} disabled={isAddingPasskey}>Cancel</Button>
+            <Button onClick={addPasskey} isLoading={isAddingPasskey}>Create passkey</Button>
           </div>
         </div>
       </Modal>
