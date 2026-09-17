@@ -14,11 +14,13 @@ import { sendEmail } from '../services/email.service';
 import { verificationEmail } from '../utils/emailTemplates';
 import { env } from '../config/env';
 import { logAuthEvent } from '../services/audit.service';
+import { normalizeAvatarDataUrl } from '../services/avatar.service';
 
 const publicUser = (user: any) => ({
   id: user.id,
   name: user.name,
   email: user.email,
+  avatarUrl: user.avatarUrl || null,
   role: user.role,
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,
@@ -42,7 +44,7 @@ const sendVerificationLink = async (user: any) => {
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user!.userId;
-    const { name, email } = req.body;
+    const { name, email, avatarUrl } = req.body;
     const user = await User.findById(userId);
 
     if (!user) {
@@ -67,8 +69,22 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
       await logAuthEvent('auth.email_change_requested', { actorId: user.id, metadata: { email: normalizedEmail }, req });
     }
 
+    if (avatarUrl !== undefined) {
+      try {
+        user.avatarUrl = avatarUrl === null ? null : normalizeAvatarDataUrl(avatarUrl);
+      } catch (error) {
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : 'Profile picture is invalid.',
+        });
+      }
+    }
+
     await user.save();
-    await logAuthEvent('auth.profile_updated', { actorId: user.id, req });
+    await logAuthEvent('auth.profile_updated', {
+      actorId: user.id,
+      metadata: avatarUrl !== undefined ? { avatarChanged: true } : undefined,
+      req,
+    });
 
     res.json({ user: publicUser(user) });
   } catch (error) {
@@ -312,6 +328,7 @@ export const deleteAccount = async (req: Request, res: Response, next: NextFunct
     user.name = 'Deleted user';
     user.passwordHash = undefined;
     user.googleId = undefined;
+    user.avatarUrl = null;
     user.mfaEnabled = false;
     user.mfaSecret = undefined;
     user.mfaRecoveryCodeHashes = [];

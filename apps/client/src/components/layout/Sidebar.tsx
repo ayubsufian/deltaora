@@ -2,6 +2,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Globe, Bell, Search, BarChart3, Settings, LogOut } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { Avatar } from '../ui/Avatar';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       to: '/dashboard' },
@@ -63,9 +64,7 @@ export function Sidebar() {
 
       <div className="border-t border-gray-200 dark:border-gray-800 p-4">
         <div className="flex items-center gap-3 px-3 py-2">
-          <div className="h-9 w-9 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-blue-700 dark:text-blue-300 font-semibold">
-            {user?.name?.charAt(0).toUpperCase() || '?'}
-          </div>
+          <Avatar name={user?.name} src={user?.avatarUrl} />
           <div className="flex-1 overflow-hidden">
             <p className="truncate text-sm font-medium text-gray-900 dark:text-white">{user?.name}</p>
             <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
+  Camera,
   Copy,
   Download,
   KeyRound,
@@ -8,6 +9,7 @@ import {
   ShieldCheck,
   Sun,
   Trash2,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
@@ -16,6 +18,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { Avatar } from '../components/ui/Avatar';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme, type ThemePreference } from '../contexts/ThemeContext';
 import api from '../lib/axios';
@@ -24,6 +27,7 @@ interface Member {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
   role: 'owner' | 'editor' | 'viewer';
   joinedAt: string;
 }
@@ -157,6 +161,9 @@ const roleOptions = [
 
 const webhookEvents = ['page.changed', 'page.failed', 'page.blocked', 'summary.created'];
 const apiScopes = ['pages:read', 'pages:write', 'notifications:read', 'webhooks:write'];
+const avatarUploadMaxBytes = 4 * 1024 * 1024;
+const avatarOutputSize = 512;
+const allowedAvatarTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
 const defaultPreferences: EmailPreferences = {
   notifications: true,
@@ -177,6 +184,50 @@ const defaultCrawlerDefaults: CrawlerDefaults = {
 function errorMessage(error: unknown, fallback: string) {
   const err = error as { response?: { data?: { error?: string; details?: string[] } } };
   return err.response?.data?.details?.[0] || err.response?.data?.error || fallback;
+}
+
+function canvasToDataUrl(canvas: HTMLCanvasElement) {
+  const webp = canvas.toDataURL('image/webp', 0.86);
+  if (webp.startsWith('data:image/webp')) return webp;
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+async function prepareAvatar(file: File) {
+  if (!allowedAvatarTypes.includes(file.type)) {
+    throw new Error('Use a JPEG, PNG, or WebP image.');
+  }
+
+  if (file.size > avatarUploadMaxBytes) {
+    throw new Error('Choose an image under 4 MB.');
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+  const image = new Image();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('This image could not be read.'));
+      image.src = imageUrl;
+    });
+
+    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+    if (!sourceSize) throw new Error('This image could not be read.');
+
+    const sourceX = Math.round((image.naturalWidth - sourceSize) / 2);
+    const sourceY = Math.round((image.naturalHeight - sourceSize) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = avatarOutputSize;
+    canvas.height = avatarOutputSize;
+
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser could not process the image.');
+
+    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, avatarOutputSize, avatarOutputSize);
+    return canvasToDataUrl(canvas);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
 }
 
 function isStepUpRequired(error: unknown) {
@@ -290,8 +341,12 @@ function Switch({
 export function Settings() {
   const { user, activeWorkspaceId, updateUser, logout } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [profileName, setProfileName] = useState(user?.name || '');
   const [profileEmail, setProfileEmail] = useState(user?.email || '');
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.avatarUrl || null);
+  const [avatarError, setAvatarError] = useState('');
+  const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -346,6 +401,7 @@ export function Settings() {
   useEffect(() => {
     setProfileName(user?.name || '');
     setProfileEmail(user?.email || '');
+    setProfileAvatarUrl(user?.avatarUrl || null);
     setMfaEnabled(Boolean(user?.mfaEnabled));
   }, [user]);
 
@@ -527,7 +583,15 @@ export function Settings() {
     setIsSaving(true);
     try {
       await requestStepUp({ reason: 'Save profile changes' });
-      const res = await api.patch('/users/me', { name: profileName, email: profileEmail });
+      const payload: { name: string; email: string; avatarUrl?: string | null } = {
+        name: profileName,
+        email: profileEmail,
+      };
+      if (profileAvatarUrl !== (user?.avatarUrl || null)) {
+        payload.avatarUrl = profileAvatarUrl;
+      }
+
+      const res = await api.patch('/users/me', payload);
       if (res.data.user) updateUser(res.data.user);
       toast.success(res.data.user?.isEmailVerified === false ? 'Profile saved. Verify the new email to keep access healthy.' : 'Profile saved');
     } catch (error) {
@@ -536,6 +600,25 @@ export function Settings() {
       }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const chooseAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setAvatarError('');
+    setIsProcessingAvatar(true);
+    try {
+      const dataUrl = await prepareAvatar(file);
+      setProfileAvatarUrl(dataUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not prepare profile picture.';
+      setAvatarError(message);
+      toast.error(message);
+    } finally {
+      setIsProcessingAvatar(false);
+      event.target.value = '';
     }
   };
 
@@ -974,52 +1057,82 @@ export function Settings() {
       <Section title="Profile" description="Keep identity details current and require step-up verification for sensitive changes.">
         <Card>
           <CardContent className="space-y-4 pt-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Input label="Name" value={profileName} onChange={event => setProfileName(event.target.value)} />
-              <div className="space-y-1.5">
-                <Input label="Email" type="email" value={profileEmail} onChange={event => setProfileEmail(event.target.value)} />
-                {/* Verification status badge — shown below the email field */}
-                {user?.isEmailVerified ? (
-                  <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                    </svg>
-                    Verified
-                  </p>
-                ) : (
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div className="flex items-center gap-4 sm:w-64 sm:flex-col sm:items-start">
+                <Avatar name={profileName || user?.name} src={profileAvatarUrl} size="xl" />
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={chooseAvatar}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => avatarInputRef.current?.click()}
+                    isLoading={isProcessingAvatar}
+                  >
+                    <Camera className="mr-2 h-4 w-4" /> Change
+                  </Button>
+                  {profileAvatarUrl && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setProfileAvatarUrl(null)}>
+                      <X className="mr-2 h-4 w-4" /> Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  Square JPEG, PNG, or WebP. Large images are resized before upload.
+                </p>
+                {avatarError && <p className="text-xs font-medium text-red-500">{avatarError}</p>}
+              </div>
+              <div className="grid flex-1 gap-4 sm:grid-cols-2">
+                <Input label="Name" value={profileName} onChange={event => setProfileName(event.target.value)} />
+                <div className="space-y-1.5">
+                  <Input label="Email" type="email" value={profileEmail} onChange={event => setProfileEmail(event.target.value)} />
+                  {user?.isEmailVerified ? (
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400">
                       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                       </svg>
-                      Not verified — check your inbox
+                      Verified
                     </p>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await api.post('/auth/send-verification');
-                          toast.success('Verification email sent');
-                        } catch {
-                          toast.error('Failed to send verification email');
-                        }
-                      }}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors shrink-0"
-                    >
-                      Resend
-                    </button>
-                  </div>
-                )}
-                {/* Warn that changing email requires re-verification */}
-                {profileEmail !== user?.email && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Changing your email will require re-verification.
-                  </p>
-                )}
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                        </svg>
+                        Not verified - check your inbox
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await api.post('/auth/send-verification');
+                            toast.success('Verification email sent');
+                          } catch {
+                            toast.error('Failed to send verification email');
+                          }
+                        }}
+                        className="shrink-0 text-xs font-medium text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                      >
+                        Resend
+                      </button>
+                    </div>
+                  )}
+                  {profileEmail !== user?.email && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Changing your email will require re-verification.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex justify-end">
-              <Button onClick={saveProfile} isLoading={isSaving} disabled={!profileName.trim() || !profileEmail.trim()}>
+              <Button onClick={saveProfile} isLoading={isSaving} disabled={!profileName.trim() || !profileEmail.trim() || isProcessingAvatar}>
                 Save profile
               </Button>
             </div>
@@ -1154,9 +1267,12 @@ export function Settings() {
             <div className="space-y-3">
               {members.map(member => (
                 <div key={member.id} className="flex flex-col gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="font-medium text-gray-950 dark:text-white">{member.name}</div>
-                    <div className="text-sm text-gray-500">{member.email}</div>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar name={member.name} src={member.avatarUrl} />
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-gray-950 dark:text-white">{member.name}</div>
+                      <div className="truncate text-sm text-gray-500">{member.email}</div>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Select

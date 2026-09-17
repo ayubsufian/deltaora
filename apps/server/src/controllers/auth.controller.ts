@@ -73,6 +73,7 @@ const publicUser = (user: any) => ({
   id: user.id,
   name: user.name,
   email: user.email,
+  avatarUrl: user.avatarUrl || null,
   role: user.role,
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,

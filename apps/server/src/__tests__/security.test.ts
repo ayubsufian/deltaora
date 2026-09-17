@@ -44,3 +44,23 @@ test('recovery codes are hashed and single-code verification returns the matchin
   assert.ok(matchingHash);
   assert.ok(hashes.includes(matchingHash));
 });
+
+test('profile picture uploads accept only validated raster image data URLs', async () => {
+  const { normalizeAvatarDataUrl } = await import('../services/avatar.service');
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l2qiYQAAAABJRU5ErkJggg==';
+
+  assert.equal(
+    normalizeAvatarDataUrl(`data:image/png;base64,${png}`),
+    `data:image/png;base64,${png}`
+  );
+
+  assert.throws(
+    () => normalizeAvatarDataUrl(`data:image/svg+xml;base64,${Buffer.from('<svg />').toString('base64')}`),
+    /JPEG, PNG, or WebP/
+  );
+
+  assert.throws(
+    () => normalizeAvatarDataUrl(`data:image/jpeg;base64,${png}`),
+    /does not match/
+  );
+});

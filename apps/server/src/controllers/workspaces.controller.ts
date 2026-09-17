@@ -25,7 +25,7 @@ export const getMembers = async (req: Request, res: Response, next: NextFunction
 
     ForbiddenError.from(req.ability!).throwUnlessCan('read', 'Workspace');
 
-    const workspace = await Workspace.findById(workspaceId).populate('members.userId', 'name email');
+    const workspace = await Workspace.findById(workspaceId).populate('members.userId', 'name email avatarUrl');
     if (!workspace) {
       return res.status(404).json({ error: 'Workspace not found' });
     }
@@ -34,6 +34,7 @@ export const getMembers = async (req: Request, res: Response, next: NextFunction
       id: (member.userId as any)._id,
       name: (member.userId as any).name,
       email: (member.userId as any).email,
+      avatarUrl: (member.userId as any).avatarUrl || null,
       role: member.role,
       joinedAt: member.joinedAt,
     }));

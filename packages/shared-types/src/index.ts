@@ -49,6 +49,7 @@ export interface IUser {
   _id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
   passwordHash?: string; // Optional for OAuth users
   role: 'user' | 'admin';
   isEmailVerified: boolean;

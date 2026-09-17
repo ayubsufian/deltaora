@@ -27,6 +27,7 @@ const UserSchema = new Schema<IUserDocument>(
   {
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    avatarUrl: { type: String, default: null },
     passwordHash: { type: String }, // Optional for OAuth
     role: { type: String, default: 'user' },
     mfaEnabled: { type: Boolean, default: false },

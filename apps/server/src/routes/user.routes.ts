@@ -32,6 +32,7 @@ router.patch(
   validate(z.object({
     name: z.string().min(2).max(50).optional(),
     email: z.string().email().optional(),
+    avatarUrl: z.string().max(750_000).nullable().optional(),
   })),
   updateProfile
 );
