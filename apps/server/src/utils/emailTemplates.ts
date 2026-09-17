@@ -114,6 +114,29 @@ export const passwordResetEmail = (resetUrl: string, baseUrl: string) => baseLay
   </table>
 `, baseUrl);
 
+export const passwordChangedEmail = (baseUrl: string, ipAddress: string) => baseLayout(`
+  <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">Your Password Was Changed</h2>
+  <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">
+    The password for your Deltaora account was changed successfully.
+  </p>
+  <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #4b5563;">
+    For your protection, other active sessions were signed out and your current session token was rotated. Request IP:
+    <strong>${escapeHtml(ipAddress)}</strong>.
+  </p>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td style="padding: 12px 16px; background-color: #fef3c7; border-radius: 8px; border-left: 4px solid #f59e0b;">
+        <p style="margin: 0; font-size: 13px; color: #92400e;">
+          <strong>Security notice:</strong> If you did not make this change, reset your password immediately and review your account sessions.
+        </p>
+      </td>
+    </tr>
+  </table>
+  <div style="text-align: center; margin-top: 24px;">
+    <a href="${baseUrl}/forgot-password" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Secure My Account</a>
+  </div>
+`, baseUrl);
+
 export const workspaceInviteEmail = (inviterName: string, workspaceName: string, joinUrl: string, baseUrl: string) => baseLayout(`
   <h2 style="margin: 0 0 16px; font-size: 22px; font-weight: 600; color: #111827;">You've Been Invited!</h2>
   <p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: #4b5563;">

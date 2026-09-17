@@ -122,3 +122,47 @@ export const requireRecentStepUp = (options: { requireMfa?: boolean } = {}) => {
     }
   };
 };
+
+export const requireRecentPasswordChangeStepUp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.userId || !req.user.sessionId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const [user, session] = await Promise.all([
+      User.findById(req.user.userId).select('mfaEnabled'),
+      UserSession.findOne({
+        _id: req.user.sessionId,
+        userId: req.user.userId,
+        revokedAt: { $exists: false },
+        expiresAt: { $gt: new Date() },
+        absoluteExpiresAt: { $gt: new Date() },
+      }).select('reauthenticatedAt mfaVerifiedAt'),
+    ]);
+
+    if (!user || !session) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (user.mfaEnabled) {
+      const isFresh = session.mfaVerifiedAt && Date.now() - session.mfaVerifiedAt.getTime() <= STEP_UP_TTL_MS;
+      if (!isFresh) {
+        return res.status(403).json({
+          error: 'Recent MFA verification required',
+          code: 'MFA_STEP_UP_REQUIRED',
+        });
+      }
+    }
+
+    if (!user.mfaEnabled && !req.body?.currentPassword) {
+      return res.status(403).json({
+        error: 'Current password required',
+        code: 'STEP_UP_REQUIRED',
+      });
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};

@@ -19,6 +19,7 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { Avatar } from '../components/ui/Avatar';
+import { PasswordGuidance } from '../components/auth/PasswordGuidance';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme, type ThemePreference } from '../contexts/ThemeContext';
 import api from '../lib/axios';
@@ -362,6 +363,8 @@ export function Settings() {
   const [verificationCode, setVerificationCode] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditPage, setAuditPage] = useState(1);
@@ -654,14 +657,28 @@ export function Settings() {
   };
 
   const changePassword = async () => {
+    if (newPassword !== confirmNewPassword) {
+      toast.error("New passwords don't match");
+      return;
+    }
+
+    setIsChangingPassword(true);
     try {
+      if (mfaEnabled) {
+        await requestStepUp({ requireMfa: true, reason: 'Change your password' });
+      }
       await api.post('/users/me/password', { currentPassword, newPassword });
       setCurrentPassword('');
       setNewPassword('');
-      toast.success('Password changed. Other sessions were revoked.');
+      setConfirmNewPassword('');
+      toast.success('Password changed. Other sessions were revoked and this session was refreshed.');
       fetchSessions();
     } catch (error) {
-      toast.error(errorMessage(error, 'Failed to change password'));
+      if ((error as Error).message !== 'Step-up cancelled') {
+        toast.error(errorMessage(error, 'Failed to change password'));
+      }
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -1359,10 +1376,42 @@ export function Settings() {
               </div>
             )}
             <div className="grid gap-3 border-t border-gray-100 pt-5 dark:border-gray-800 sm:grid-cols-2">
-              <Input label="Current password" type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} />
-              <Input label="New password" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} />
+              <Input
+                label="Current password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={event => setCurrentPassword(event.target.value)}
+              />
+              <Input
+                label="New password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={event => setNewPassword(event.target.value)}
+              />
+              <Input
+                label="Confirm new password"
+                type="password"
+                autoComplete="new-password"
+                value={confirmNewPassword}
+                onChange={event => setConfirmNewPassword(event.target.value)}
+                error={confirmNewPassword && newPassword !== confirmNewPassword ? "Passwords don't match" : undefined}
+              />
+              <div className="self-end text-sm text-gray-500 dark:text-gray-400">
+                {mfaEnabled ? 'MFA verification is required before the password is changed.' : 'Other active sessions will be signed out after the change.'}
+              </div>
               <div className="sm:col-span-2">
-                <Button onClick={changePassword} disabled={!currentPassword || newPassword.length < 15}>Change password</Button>
+                <PasswordGuidance password={newPassword} email={user?.email} name={user?.name} />
+              </div>
+              <div className="sm:col-span-2">
+                <Button
+                  onClick={changePassword}
+                  isLoading={isChangingPassword}
+                  disabled={!currentPassword || newPassword.length < 15 || newPassword !== confirmNewPassword}
+                >
+                  Change password
+                </Button>
               </div>
             </div>
             <div className="border-t border-gray-100 pt-5 dark:border-gray-800">

@@ -6,12 +6,12 @@ import { MonitoredPage } from '../models/MonitoredPage';
 import { Notification } from '../models/Notification';
 import { EmailVerificationToken } from '../models/EmailVerificationToken';
 import { PasskeyCredential } from '../models/PasskeyCredential';
-import { revokeAllUserSessions } from '../services/auth.service';
+import { generateTokens, revokeAllUserSessions, setAuthCookies } from '../services/auth.service';
 import * as argon2 from 'argon2';
 import { validatePasswordPolicy } from '../services/passwordPolicy.service';
-import { generateRecoveryCodes, randomToken, sha256 } from '../services/security.service';
+import { generateRecoveryCodes, getRequestIp, randomToken, sha256 } from '../services/security.service';
 import { sendEmail } from '../services/email.service';
-import { verificationEmail } from '../utils/emailTemplates';
+import { passwordChangedEmail, verificationEmail } from '../utils/emailTemplates';
 import { env } from '../config/env';
 import { logAuthEvent } from '../services/audit.service';
 import { normalizeAvatarDataUrl } from '../services/avatar.service';
@@ -187,7 +187,17 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
       { userId, _id: { $ne: req.user!.sessionId }, revokedAt: { $exists: false } },
       { $set: { revokedAt: new Date(), revokedReason: 'password_changed' } }
     );
+    const tokens = await generateTokens(user.id, user.role, req, req.user!.sessionId, {
+      markReauthenticated: true,
+      markMfaVerified: user.mfaEnabled,
+    });
+    setAuthCookies(res, tokens);
     await logAuthEvent('auth.password_changed', { actorId: user.id, req });
+    sendEmail({
+      to: user.email,
+      subject: 'Deltaora Security Alert - Password Changed',
+      htmlContent: passwordChangedEmail(env.CLIENT_URL, getRequestIp(req) || 'unknown'),
+    }).catch(err => console.error('Failed to send password change notification:', err));
 
     res.json({ message: 'Password changed successfully. Other sessions were revoked.' });
   } catch (error) {

@@ -16,12 +16,28 @@ import {
   updateProfile,
   updatePreferences,
 } from '../controllers/user.controller';
-import { requireAdminMfa, requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
+import { requireAdminMfa, requireAuth, requireRecentPasswordChangeStepUp, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
 import { authorize, resolveAbility } from '../middleware/authorize';
 import { validate } from '../middleware/validate';
 import { z } from 'zod';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import { redis } from '../config/redis';
 
 const router = Router();
+
+const passwordChangeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many password change attempts. Please try again in 15 minutes.' },
+  keyGenerator: req => `${req.user?.userId || 'unknown'}:${ipKeyGenerator(req.ip ?? 'unknown')}`,
+  store: new RedisStore({
+    prefix: 'rl:change_pw:',
+    sendCommand: (...args: string[]) => (redis as any).call(...args),
+  }),
+});
 
 router.use(requireAuth);
 router.use(requireVerifiedEmail);
@@ -53,6 +69,8 @@ router.patch(
 );
 router.post(
   '/me/password',
+  passwordChangeLimiter,
+  requireRecentPasswordChangeStepUp,
   validate(z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(15).max(1024) })),
   changePassword
 );
