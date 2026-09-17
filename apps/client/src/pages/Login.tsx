@@ -77,7 +77,10 @@ export function Login() {
       toast.success('Logged in with passkey');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Passkey sign-in failed');
+      const message = error.response?.data?.error === 'Invalid email or password'
+        ? 'Passkey sign-in failed'
+        : error.response?.data?.error || 'Passkey sign-in failed';
+      toast.error(message);
     }
   };
 

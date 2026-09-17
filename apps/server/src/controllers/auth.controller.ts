@@ -43,14 +43,21 @@ import {
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 const otp = new OTP();
 const GENERIC_LOGIN_ERROR = 'Invalid email or password';
+const PASSKEY_LOGIN_ERROR = 'Passkey sign-in failed';
 const GENERIC_REGISTER_MESSAGE = 'If this email can be used, a verification email has been sent.';
 const RESET_MESSAGE = 'If an account exists with that email, a password reset link has been sent.';
 const WEBAUTHN_VERIFICATION_ERROR_PREFIXES = [
-  'User verification required',
-  'Authenticator counter did not increase',
-  'Response challenge did not match',
+  'Credential ID was not base64url-encoded',
+  'Credential response',
+  'Missing credential ID',
+  'Response counter value',
+  'Unexpected authentication response challenge',
   'Unexpected authentication response origin',
-  'Unexpected authentication response RP ID',
+  'Unexpected authentication response type',
+  'Unexpected credential type',
+  'Unexpected tokenBinding status',
+  'User not present',
+  'User verification required',
 ];
 
 const webAuthnOrigin = () => env.WEBAUTHN_ORIGIN || env.CLIENT_URL;
@@ -789,7 +796,7 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
     const credential = await PasskeyCredential.findOne({ credentialId });
     if (!credential) {
       await logAuthEvent('auth.passkey_login_failed', { metadata: { reason: 'unknown_credential' }, req });
-      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+      return res.status(401).json({ error: PASSKEY_LOGIN_ERROR });
     }
 
     const challengeRecord = await redis.get(`webauthn:authentication:${credential.credentialId}`);
@@ -800,7 +807,7 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
     const { challenge, userId } = JSON.parse(challengeRecord);
     const user = await User.findById(userId);
     if (!user || user.status !== 'active') {
-      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+      return res.status(401).json({ error: PASSKEY_LOGIN_ERROR });
     }
 
     let verification;
@@ -828,7 +835,8 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
         metadata: { reason: 'verification_failed', detail: error.message },
         req,
       });
-      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+      console.warn('Passkey authentication verification failed:', error.message);
+      return res.status(401).json({ error: PASSKEY_LOGIN_ERROR });
     }
 
     if (!verification.verified || !verification.authenticationInfo) {
@@ -837,7 +845,7 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
         metadata: { reason: 'verification_failed' },
         req,
       });
-      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+      return res.status(401).json({ error: PASSKEY_LOGIN_ERROR });
     }
 
     credential.counter = (verification.authenticationInfo as any).newCounter;
