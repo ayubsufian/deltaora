@@ -45,9 +45,21 @@ const otp = new OTP();
 const GENERIC_LOGIN_ERROR = 'Invalid email or password';
 const GENERIC_REGISTER_MESSAGE = 'If this email can be used, a verification email has been sent.';
 const RESET_MESSAGE = 'If an account exists with that email, a password reset link has been sent.';
+const WEBAUTHN_VERIFICATION_ERROR_PREFIXES = [
+  'User verification required',
+  'Authenticator counter did not increase',
+  'Response challenge did not match',
+  'Unexpected authentication response origin',
+  'Unexpected authentication response RP ID',
+];
 
 const webAuthnOrigin = () => env.WEBAUTHN_ORIGIN || env.CLIENT_URL;
 const webAuthnRpId = () => env.WEBAUTHN_RP_ID || new URL(webAuthnOrigin()).hostname;
+
+const isWebAuthnVerificationError = (error: any) => (
+  error instanceof Error
+  && WEBAUTHN_VERIFICATION_ERROR_PREFIXES.some(prefix => error.message.startsWith(prefix))
+);
 
 const publicUser = (user: any) => ({
   id: user.id,
@@ -791,19 +803,33 @@ export const verifyPasskeyAuthentication = async (req: Request, res: Response, n
       return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     }
 
-    const verification = await verifyAuthenticationResponse({
-      response: req.body.credential,
-      expectedChallenge: challenge,
-      expectedOrigin: webAuthnOrigin(),
-      expectedRPID: webAuthnRpId(),
-      credential: {
-        id: credential.credentialId,
-        publicKey: new Uint8Array(credential.publicKey),
-        counter: credential.counter,
-        transports: credential.transports as any,
-      },
-      requireUserVerification: true,
-    } as any);
+    let verification;
+    try {
+      verification = await verifyAuthenticationResponse({
+        response: req.body.credential,
+        expectedChallenge: challenge,
+        expectedOrigin: webAuthnOrigin(),
+        expectedRPID: webAuthnRpId(),
+        credential: {
+          id: credential.credentialId,
+          publicKey: new Uint8Array(credential.publicKey),
+          counter: credential.counter,
+          transports: credential.transports as any,
+        },
+        requireUserVerification: true,
+      } as any);
+    } catch (error: any) {
+      if (!isWebAuthnVerificationError(error)) {
+        throw error;
+      }
+
+      await logAuthEvent('auth.passkey_login_failed', {
+        actorId: user.id,
+        metadata: { reason: 'verification_failed', detail: error.message },
+        req,
+      });
+      return res.status(401).json({ error: GENERIC_LOGIN_ERROR });
+    }
 
     if (!verification.verified || !verification.authenticationInfo) {
       await logAuthEvent('auth.passkey_login_failed', {
