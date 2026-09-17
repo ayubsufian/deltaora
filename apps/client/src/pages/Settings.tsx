@@ -333,6 +333,7 @@ export function Settings() {
   const [isAddingPasskey, setIsAddingPasskey] = useState(false);
   const [passkeyError, setPasskeyError] = useState('');
   const [renamePasskeyState, setRenamePasskeyState] = useState<{ id: string; name: string } | null>(null);
+  const [isRenamingPasskey, setIsRenamingPasskey] = useState(false);
   const [stepUpRequest, setStepUpRequest] = useState<StepUpRequest | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [confirmText, setConfirmText] = useState('');
@@ -695,17 +696,25 @@ export function Settings() {
   };
 
   const renamePasskey = async () => {
-    if (!renamePasskeyState) return;
+    if (!renamePasskeyState || isRenamingPasskey) return;
+    const passkeyToRename = {
+      ...renamePasskeyState,
+      name: renamePasskeyState.name.trim(),
+    };
+    setIsRenamingPasskey(true);
+    setRenamePasskeyState(null);
     try {
       await requestStepUp({ reason: 'Rename passkey' });
-      await api.patch(`/users/me/passkeys/${renamePasskeyState.id}`, { name: renamePasskeyState.name });
-      setRenamePasskeyState(null);
+      await api.patch(`/users/me/passkeys/${passkeyToRename.id}`, { name: passkeyToRename.name });
       toast.success('Passkey renamed');
       fetchPasskeys();
     } catch (error) {
+      setRenamePasskeyState(passkeyToRename);
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to rename passkey'));
       }
+    } finally {
+      setIsRenamingPasskey(false);
     }
   };
 
@@ -1548,8 +1557,8 @@ export function Settings() {
         <div className="space-y-4">
           <Input label="Name" value={renamePasskeyState?.name || ''} onChange={event => renamePasskeyState && setRenamePasskeyState({ ...renamePasskeyState, name: event.target.value })} />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setRenamePasskeyState(null)}>Cancel</Button>
-            <Button onClick={renamePasskey} disabled={!renamePasskeyState?.name.trim()}>Save</Button>
+            <Button variant="outline" onClick={() => setRenamePasskeyState(null)} disabled={isRenamingPasskey}>Cancel</Button>
+            <Button onClick={renamePasskey} disabled={!renamePasskeyState?.name.trim()} isLoading={isRenamingPasskey}>Save</Button>
           </div>
         </div>
       </Modal>
