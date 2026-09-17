@@ -19,16 +19,20 @@ const mfaLoginSchema = loginSchema.extend({
 
 type LoginForm = z.infer<typeof mfaLoginSchema>;
 
+const MFA_VERIFICATION_ERROR = "We couldn't verify the code. Check it and try again.";
+
 export function Login() {
   const navigate = useNavigate();
   const { login, passkeyLogin, googleLogin } = useAuth();
   const [requiresMfa, setRequiresMfa] = useState(false);
   
-  const { register, handleSubmit, getValues, formState: { errors, isSubmitting } } = useForm<LoginForm>({
+  const { register, handleSubmit, getValues, setError, clearErrors, formState: { errors, isSubmitting } } = useForm<LoginForm>({
     resolver: zodResolver(mfaLoginSchema),
   });
 
   const onSubmit = async (data: LoginForm) => {
+    clearErrors(['mfaCode', 'recoveryCode']);
+
     try {
       await login(data.email, data.password, data.mfaCode, data.recoveryCode);
       toast.success('Logged in successfully');
@@ -40,6 +44,10 @@ export function Login() {
       if (errRes?.error === 'MFA_REQUIRED') {
         setRequiresMfa(true);
         toast('Multi-factor authentication required', { icon: '🔐' });
+      } else if (errRes?.error === 'INVALID_MFA') {
+        const field = data.recoveryCode?.trim() ? 'recoveryCode' : 'mfaCode';
+        setError(field, { type: 'server', message: MFA_VERIFICATION_ERROR }, { shouldFocus: true });
+        toast.error(MFA_VERIFICATION_ERROR);
       } else if (status === 429) {
         // Account lockout (has retryAfterSeconds) vs IP rate limit (does not)
         if (errRes?.retryAfterSeconds) {
