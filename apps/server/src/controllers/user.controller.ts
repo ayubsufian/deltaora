@@ -15,6 +15,7 @@ import { passwordChangedEmail, verificationEmail } from '../utils/emailTemplates
 import { env } from '../config/env';
 import { logAuthEvent } from '../services/audit.service';
 import { normalizeAvatarDataUrl } from '../services/avatar.service';
+import { redis } from '../config/redis';
 
 const publicUser = (user: any) => ({
   id: user.id,
@@ -25,6 +26,13 @@ const publicUser = (user: any) => ({
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,
 });
+
+const removeRefreshTokenKeys = async (sessionIds: string[]) => {
+  if (sessionIds.length === 0) return;
+  const pipeline = redis.pipeline();
+  sessionIds.forEach(sessionId => pipeline.del(`refresh_token:${sessionId}`));
+  await pipeline.exec();
+};
 
 const sendVerificationLink = async (user: any) => {
   const token = randomToken(32);
@@ -276,6 +284,7 @@ export const revokeSession = async (req: Request, res: Response, next: NextFunct
     );
 
     if (!session) return res.status(404).json({ error: 'Session not found' });
+    await removeRefreshTokenKeys([session.id]);
     await logAuthEvent('auth.session_revoked', {
       actorId: req.user!.userId,
       metadata: { sessionId },
@@ -289,12 +298,19 @@ export const revokeSession = async (req: Request, res: Response, next: NextFunct
 
 export const revokeOtherSessions = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const sessions = await UserSession.find({
+      userId: req.user!.userId,
+      _id: { $ne: req.user!.sessionId },
+      revokedAt: { $exists: false },
+    }).select('_id');
+
     await UserSession.updateMany(
       { userId: req.user!.userId, _id: { $ne: req.user!.sessionId }, revokedAt: { $exists: false } },
       { $set: { revokedAt: new Date(), revokedReason: 'user_revoked_all_other' } }
     );
+    await removeRefreshTokenKeys(sessions.map(session => session.id));
     await logAuthEvent('auth.other_sessions_revoked', { actorId: req.user!.userId, req });
-    res.json({ message: 'Other sessions revoked' });
+    res.json({ message: 'Other sessions revoked', revokedCount: sessions.length });
   } catch (error) {
     next(error);
   }

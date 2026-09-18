@@ -47,7 +47,9 @@ interface Session {
   userAgent?: string;
   ipAddress?: string;
   lastSeenAt: string;
+  createdAt: string;
   expiresAt: string;
+  absoluteExpiresAt?: string;
   current: boolean;
 }
 
@@ -267,6 +269,39 @@ function formatDate(value?: string) {
   }).format(new Date(value));
 }
 
+function detectBrowser(userAgent = '') {
+  if (/Edg\//.test(userAgent)) return 'Microsoft Edge';
+  if (/Chrome\//.test(userAgent) && !/Chromium\//.test(userAgent)) return 'Chrome';
+  if (/Firefox\//.test(userAgent)) return 'Firefox';
+  if (/Safari\//.test(userAgent) && !/Chrome\//.test(userAgent)) return 'Safari';
+  if (/OPR\//.test(userAgent)) return 'Opera';
+  return 'Unknown browser';
+}
+
+function detectDevice(userAgent = '') {
+  if (/iPhone|Android.*Mobile|Windows Phone/i.test(userAgent)) return 'Phone';
+  if (/iPad|Tablet|Android/i.test(userAgent)) return 'Tablet';
+  if (/Macintosh|Windows NT|Linux|CrOS/i.test(userAgent)) return 'Desktop';
+  return 'Unknown device';
+}
+
+function detectOperatingSystem(userAgent = '') {
+  if (/Windows NT/i.test(userAgent)) return 'Windows';
+  if (/Mac OS X|Macintosh/i.test(userAgent)) return 'macOS';
+  if (/iPhone|iPad/i.test(userAgent)) return 'iOS';
+  if (/Android/i.test(userAgent)) return 'Android';
+  if (/CrOS/i.test(userAgent)) return 'ChromeOS';
+  if (/Linux/i.test(userAgent)) return 'Linux';
+  return 'Unknown OS';
+}
+
+function sessionDisplayName(session: Session) {
+  if (!session.userAgent) return session.current ? 'Current session' : 'Unknown session';
+  const browser = detectBrowser(session.userAgent);
+  const device = detectDevice(session.userAgent);
+  return `${browser} on ${device}`;
+}
+
 function Section({
   title,
   description,
@@ -355,6 +390,8 @@ export function Settings() {
   const [inviteToken, setInviteToken] = useState('');
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [sessionsError, setSessionsError] = useState('');
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [mfaEnabled, setMfaEnabled] = useState(Boolean(user?.mfaEnabled));
   const [isSettingUpMfa, setIsSettingUpMfa] = useState(false);
@@ -400,6 +437,7 @@ export function Settings() {
   const isOwner = useMemo(() => {
     return user?.role === 'admin' || members.some(member => member.id === user?.id && member.role === 'owner');
   }, [members, user?.id, user?.role]);
+  const hasOtherSessions = useMemo(() => sessions.some(session => !session.current), [sessions]);
 
   useEffect(() => {
     setProfileName(user?.name || '');
@@ -442,11 +480,16 @@ export function Settings() {
   }, []);
 
   const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    setSessionsError('');
     try {
       const res = await api.get('/users/me/sessions');
       setSessions(res.data || []);
-    } catch {
+    } catch (error) {
       setSessions([]);
+      setSessionsError(errorMessage(error, 'Could not load active sessions.'));
+    } finally {
+      setIsLoadingSessions(false);
     }
   }, []);
 
@@ -831,25 +874,27 @@ export function Settings() {
   });
 
   const revokeSession = (session: Session) => askConfirm({
-    title: session.current ? 'Sign out current session' : 'Revoke session',
-    description: session.current ? 'You will be signed out on this device.' : 'This device will need to sign in again.',
-    actionLabel: session.current ? 'Sign out' : 'Revoke session',
+    title: session.current ? 'Sign out current session' : 'Sign out session',
+    description: session.current
+      ? 'You will be signed out on this device.'
+      : `${sessionDisplayName(session)} will need to sign in again before it can access Deltaora.`,
+    actionLabel: session.current ? 'Sign out this session' : 'Sign out session',
     onConfirm: async () => {
-      await requestStepUp({ reason: 'Revoke session' });
+      await requestStepUp({ reason: session.current ? 'Sign out current session' : 'Sign out another session' });
       await api.delete(`/users/me/sessions/${session.id}`);
-      toast.success('Session revoked');
+      toast.success(session.current ? 'Signed out this session' : 'Session signed out');
       session.current ? logout() : fetchSessions();
     },
   });
 
   const revokeOtherSessions = () => askConfirm({
-    title: 'Revoke all other sessions',
-    description: 'Every other browser and device will need to sign in again.',
-    actionLabel: 'Revoke other sessions',
+    title: 'Sign out all other sessions',
+    description: 'Every other browser and device will need to sign in again. This session will stay active.',
+    actionLabel: 'Sign out other sessions',
     onConfirm: async () => {
-      await requestStepUp({ reason: 'Revoke other sessions' });
+      await requestStepUp({ reason: 'Sign out other sessions' });
       await api.delete('/users/me/sessions/others');
-      toast.success('Other sessions revoked');
+      toast.success('Other sessions signed out');
       fetchSessions();
     },
   });
@@ -1443,23 +1488,77 @@ export function Settings() {
               </div>
             </div>
             <div className="border-t border-gray-100 pt-5 dark:border-gray-800">
-              <div className="mb-3 flex items-center justify-between">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="font-medium text-gray-950 dark:text-white">Active sessions</div>
-                  <p className="text-sm text-gray-500">Review browsers and devices with active access.</p>
+                  <div className="font-medium text-gray-950 dark:text-white">Sessions and devices</div>
+                  <p className="text-sm text-gray-500">Review active browsers, sign-in times, and remote access.</p>
                 </div>
-                <Button variant="outline" onClick={revokeOtherSessions}>Revoke others</Button>
+                <Button
+                  variant="outline"
+                  disabled={!hasOtherSessions || isLoadingSessions}
+                  onClick={revokeOtherSessions}
+                >
+                  Sign out other sessions
+                </Button>
               </div>
               <div className="space-y-2">
-                {sessions.map(session => (
-                  <div key={session.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-medium text-gray-950 dark:text-white">{session.current ? 'Current session' : session.userAgent || 'Unknown device'}</div>
-                      <div className="text-sm text-gray-500">{session.ipAddress || 'Unknown IP'} / Last seen {formatDate(session.lastSeenAt)}</div>
-                    </div>
-                    <Button variant="outline" onClick={() => revokeSession(session)}>{session.current ? 'Sign out' : 'Revoke'}</Button>
+                {isLoadingSessions && <p className="text-sm text-gray-500">Loading active sessions...</p>}
+                {!isLoadingSessions && sessionsError && (
+                  <div className="flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{sessionsError}</span>
+                    <Button variant="outline" onClick={fetchSessions}>Retry</Button>
                   </div>
-                ))}
+                )}
+                {!isLoadingSessions && !sessionsError && sessions.length === 0 && (
+                  <p className="rounded-md border border-gray-200 p-3 text-sm text-gray-500 dark:border-gray-800">No active sessions found.</p>
+                )}
+                {!isLoadingSessions && !sessionsError && sessions.map(session => {
+                  const browser = detectBrowser(session.userAgent);
+                  const device = detectDevice(session.userAgent);
+                  const operatingSystem = detectOperatingSystem(session.userAgent);
+
+                  return (
+                    <div key={session.id} className="flex flex-col gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-800 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-medium text-gray-950 dark:text-white">{browser} on {device}</div>
+                          {session.current && (
+                            <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                              Current session
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">{operatingSystem} / {session.ipAddress || 'Unknown IP address'}</div>
+                        <dl className="mt-3 grid gap-2 text-xs text-gray-500 sm:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <dt className="font-medium uppercase tracking-wide text-gray-400">Signed in</dt>
+                            <dd className="mt-0.5">{formatDate(session.createdAt)}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-medium uppercase tracking-wide text-gray-400">Last active</dt>
+                            <dd className="mt-0.5">{formatDate(session.lastSeenAt)}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-medium uppercase tracking-wide text-gray-400">Idle expires</dt>
+                            <dd className="mt-0.5">{formatDate(session.expiresAt)}</dd>
+                          </div>
+                          <div>
+                            <dt className="font-medium uppercase tracking-wide text-gray-400">Max expires</dt>
+                            <dd className="mt-0.5">{formatDate(session.absoluteExpiresAt)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="shrink-0"
+                        aria-label={session.current ? 'Sign out current session' : `Sign out ${browser} session`}
+                        onClick={() => revokeSession(session)}
+                      >
+                        {session.current ? 'Sign out this session' : 'Sign out'}
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </CardContent>
