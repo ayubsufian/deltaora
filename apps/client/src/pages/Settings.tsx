@@ -111,7 +111,7 @@ interface CrawlerAuthSession {
   createdAt: string;
 }
 
-interface EmailPreferences {
+interface NotificationPreferences {
   notifications: boolean;
   marketing: boolean;
   inApp: boolean;
@@ -166,7 +166,7 @@ const avatarUploadMaxBytes = 4 * 1024 * 1024;
 const avatarOutputSize = 512;
 const allowedAvatarTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
-const defaultPreferences: EmailPreferences = {
+const defaultNotificationPreferences: NotificationPreferences = {
   notifications: true,
   marketing: false,
   inApp: true,
@@ -353,7 +353,7 @@ export function Settings() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
   const [inviteToken, setInviteToken] = useState('');
-  const [emailPreferences, setEmailPreferences] = useState<EmailPreferences>(defaultPreferences);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [mfaEnabled, setMfaEnabled] = useState(Boolean(user?.mfaEnabled));
@@ -435,7 +435,7 @@ export function Settings() {
   const fetchPreferences = useCallback(async () => {
     try {
       const res = await api.get('/users/me/preferences');
-      setEmailPreferences({ ...defaultPreferences, ...(res.data.emailPreferences || {}) });
+      setNotificationPreferences({ ...defaultNotificationPreferences, ...(res.data.emailPreferences || {}) });
     } catch {
       // Preferences are non-critical for first paint.
     }
@@ -648,8 +648,8 @@ export function Settings() {
 
   const savePreferences = async () => {
     try {
-      const res = await api.patch('/users/me/preferences', emailPreferences);
-      setEmailPreferences({ ...defaultPreferences, ...(res.data.emailPreferences || {}) });
+      const res = await api.patch('/users/me/preferences', notificationPreferences);
+      setNotificationPreferences({ ...defaultNotificationPreferences, ...(res.data.emailPreferences || {}) });
       toast.success('Notification preferences saved');
     } catch (error) {
       toast.error(errorMessage(error, 'Failed to save preferences'));
@@ -1224,7 +1224,7 @@ export function Settings() {
                 })}
               />
             </SettingRow>
-            <SettingRow title="Default alert importance" description="Set the workspace floor for new monitoring notifications.">
+            <SettingRow title="Default alert importance for new monitors" description="Set the workspace-level alert floor applied to newly monitored pages.">
               <Select
                 value={workspaceSettings?.notificationDefaults.minimumImportance || 'medium'}
                 disabled={!workspaceSettings || !isOwner}
@@ -1466,27 +1466,96 @@ export function Settings() {
         </Card>
       </Section>
 
-      <Section title="Notifications" description="Tune email and in-app alert volume without losing critical monitoring signals.">
+      <Section title="Notification preferences" description="Control how monitoring alerts and product emails reach your account.">
         <Card>
-          <CardContent className="space-y-1 pt-6">
-            <SettingRow title="Email monitoring alerts">
-              <Switch checked={emailPreferences.notifications} label="Email monitoring alerts" onChange={checked => setEmailPreferences({ ...emailPreferences, notifications: checked })} />
-            </SettingRow>
-            <SettingRow title="In-app notifications">
-              <Switch checked={emailPreferences.inApp} label="In-app notifications" onChange={checked => setEmailPreferences({ ...emailPreferences, inApp: checked })} />
-            </SettingRow>
-            <SettingRow title="Product and marketing email">
-              <Switch checked={emailPreferences.marketing} label="Product and marketing email" onChange={checked => setEmailPreferences({ ...emailPreferences, marketing: checked })} />
-            </SettingRow>
-            <div className="grid gap-4 py-4 sm:grid-cols-2">
-              <Select label="Digest frequency" value={emailPreferences.digestFrequency} options={digestOptions} onChange={event => setEmailPreferences({ ...emailPreferences, digestFrequency: event.target.value as EmailPreferences['digestFrequency'] })} />
-              <Select label="Minimum importance" value={emailPreferences.minimumImportance} options={importanceOptions} onChange={event => setEmailPreferences({ ...emailPreferences, minimumImportance: event.target.value as EmailPreferences['minimumImportance'] })} />
-              <Input label="Quiet hours start" type="time" value={emailPreferences.quietHoursStart || ''} onChange={event => setEmailPreferences({ ...emailPreferences, quietHoursStart: event.target.value })} />
-              <Input label="Quiet hours end" type="time" value={emailPreferences.quietHoursEnd || ''} onChange={event => setEmailPreferences({ ...emailPreferences, quietHoursEnd: event.target.value })} />
-              <Input label="Timezone" value={emailPreferences.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || ''} onChange={event => setEmailPreferences({ ...emailPreferences, timezone: event.target.value })} />
-            </div>
+          <CardContent className="space-y-6 pt-6">
+            <fieldset className="space-y-1">
+              <legend className="text-sm font-semibold text-gray-950 dark:text-white">Alert channels</legend>
+              <p className="text-sm leading-5 text-gray-500 dark:text-gray-400">Choose where monitoring alerts are delivered.</p>
+              <SettingRow title="Email alerts" description="Send monitoring alerts to your account email address.">
+                <Switch
+                  checked={notificationPreferences.notifications}
+                  label="Email alerts"
+                  onChange={checked => setNotificationPreferences({ ...notificationPreferences, notifications: checked })}
+                />
+              </SettingRow>
+              <SettingRow title="In-app alerts" description="Show monitoring alerts in the Deltaora notifications inbox.">
+                <Switch
+                  checked={notificationPreferences.inApp}
+                  label="In-app alerts"
+                  onChange={checked => setNotificationPreferences({ ...notificationPreferences, inApp: checked })}
+                />
+              </SettingRow>
+            </fieldset>
+
+            <fieldset className="space-y-1 border-t border-gray-100 pt-5 dark:border-gray-800">
+              <legend className="text-sm font-semibold text-gray-950 dark:text-white">Alert rules</legend>
+              <p className="text-sm leading-5 text-gray-500 dark:text-gray-400">Filter account-level alert volume without changing workspace defaults.</p>
+              <div className="grid gap-4 py-4 sm:grid-cols-2">
+                <Select
+                  id="notification-minimum-importance"
+                  label="Minimum alert importance to notify me"
+                  value={notificationPreferences.minimumImportance}
+                  options={importanceOptions}
+                  onChange={event => setNotificationPreferences({
+                    ...notificationPreferences,
+                    minimumImportance: event.target.value as NotificationPreferences['minimumImportance'],
+                  })}
+                />
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-1 border-t border-gray-100 pt-5 dark:border-gray-800">
+              <legend className="text-sm font-semibold text-gray-950 dark:text-white">Email delivery schedule</legend>
+              <p className="text-sm leading-5 text-gray-500 dark:text-gray-400">Set email frequency and quiet-hour timing for non-critical monitoring alerts.</p>
+              <div className="grid gap-4 py-4 sm:grid-cols-2">
+                <Select
+                  id="notification-email-frequency"
+                  label="Email alert frequency"
+                  value={notificationPreferences.digestFrequency}
+                  options={digestOptions}
+                  disabled={!notificationPreferences.notifications}
+                  onChange={event => setNotificationPreferences({
+                    ...notificationPreferences,
+                    digestFrequency: event.target.value as NotificationPreferences['digestFrequency'],
+                  })}
+                />
+                <Input
+                  id="notification-quiet-hours-start"
+                  label="Quiet hours start"
+                  type="time"
+                  value={notificationPreferences.quietHoursStart || ''}
+                  onChange={event => setNotificationPreferences({ ...notificationPreferences, quietHoursStart: event.target.value })}
+                />
+                <Input
+                  id="notification-quiet-hours-end"
+                  label="Quiet hours end"
+                  type="time"
+                  value={notificationPreferences.quietHoursEnd || ''}
+                  onChange={event => setNotificationPreferences({ ...notificationPreferences, quietHoursEnd: event.target.value })}
+                />
+                <Input
+                  id="notification-time-zone"
+                  label="Quiet hours time zone"
+                  value={notificationPreferences.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || ''}
+                  onChange={event => setNotificationPreferences({ ...notificationPreferences, timezone: event.target.value })}
+                />
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-1 border-t border-gray-100 pt-5 dark:border-gray-800">
+              <legend className="text-sm font-semibold text-gray-950 dark:text-white">Product communications</legend>
+              <SettingRow title="Product updates and marketing emails" description="Receive occasional feature news, launch notes, and offers.">
+                <Switch
+                  checked={notificationPreferences.marketing}
+                  label="Product updates and marketing emails"
+                  onChange={checked => setNotificationPreferences({ ...notificationPreferences, marketing: checked })}
+                />
+              </SettingRow>
+            </fieldset>
+
             <div className="flex justify-end">
-              <Button onClick={savePreferences}>Save notification settings</Button>
+              <Button onClick={savePreferences}>Save notification preferences</Button>
             </div>
           </CardContent>
         </Card>

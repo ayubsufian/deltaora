@@ -8,11 +8,17 @@ export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElemen
 
 const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ className = '', error, label, options, id, ...props }, ref) => {
+    const generatedId = React.useId();
+    const selectId = id || props.name || generatedId;
+    const errorId = `${selectId}-error`;
+    const { ['aria-describedby']: ariaDescribedBy, ...selectProps } = props;
+    const describedBy = [ariaDescribedBy, error ? errorId : undefined].filter(Boolean).join(' ') || undefined;
+
     return (
       <div className="w-full">
         {label && (
           <label
-            htmlFor={id}
+            htmlFor={selectId}
             className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
           >
             {label}
@@ -23,8 +29,10 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             error ? 'border-red-500 focus-visible:ring-red-500' : ''
           } ${className}`}
           ref={ref}
-          id={id}
-          {...props}
+          id={selectId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          {...selectProps}
         >
           {options.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -32,7 +40,7 @@ const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             </option>
           ))}
         </select>
-        {error && <p className="mt-1 text-sm text-red-500">{error}</p>}
+        {error && <p id={errorId} role="alert" className="mt-1 text-sm text-red-500">{error}</p>}
       </div>
     );
   }
