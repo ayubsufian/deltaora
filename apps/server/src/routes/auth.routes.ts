@@ -157,6 +157,7 @@ router.post('/mfa/setup', requireAuth, requireRecentStepUp(), setupMfa);
 router.post('/mfa/verify', requireAuth, validate(z.object({ code: z.string().length(6) })), verifyMfa);
 router.post('/step-up', requireAuth, validate(z.object({
   currentPassword: z.string().optional(),
+  googleToken: z.string().optional(),
   mfaCode: z.string().optional(),
   recoveryCode: z.string().optional(),
 })), stepUp);

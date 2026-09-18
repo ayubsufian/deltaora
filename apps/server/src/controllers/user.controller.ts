@@ -25,6 +25,10 @@ const publicUser = (user: any) => ({
   role: user.role,
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,
+  authMethods: {
+    password: Boolean(user.passwordHash),
+    google: Boolean(user.googleId),
+  },
 });
 
 const removeRefreshTokenKeys = async (sessionIds: string[]) => {

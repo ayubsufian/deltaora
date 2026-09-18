@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
+import { GoogleLogin } from '@react-oauth/google';
 import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -125,7 +126,7 @@ interface NotificationPreferences {
 }
 
 interface StepUpRequest {
-  mode: 'password' | 'mfa';
+  mode: 'password' | 'mfa' | 'google';
   reason: string;
   value: string;
   isSubmitting: boolean;
@@ -575,9 +576,22 @@ export function Settings() {
       return Promise.reject(new Error('MFA required'));
     }
 
+    const mode: StepUpRequest['mode'] = mustUseMfa
+      ? 'mfa'
+      : user?.authMethods?.password
+        ? 'password'
+        : user?.authMethods?.google
+          ? 'google'
+          : 'password';
+
+    if (mode === 'password' && user?.authMethods && !user.authMethods.password) {
+      toast.error('Add a password, Google sign-in, or MFA before performing sensitive actions.');
+      return Promise.reject(new Error('Step-up unavailable'));
+    }
+
     return new Promise<void>((resolve, reject) => {
       setStepUpRequest({
-        mode: mustUseMfa ? 'mfa' : 'password',
+        mode,
         reason: options.reason,
         value: '',
         isSubmitting: false,
@@ -585,7 +599,7 @@ export function Settings() {
         reject,
       });
     });
-  }, [mfaEnabled, user?.role]);
+  }, [mfaEnabled, user?.authMethods, user?.role]);
 
   const submitStepUp = async () => {
     if (!stepUpRequest || !stepUpRequest.value.trim()) return;
@@ -599,6 +613,23 @@ export function Settings() {
     } catch (error) {
       toast.error(errorMessage(error, 'Verification failed'));
       setStepUpRequest({ ...stepUpRequest, value: '', isSubmitting: false });
+    }
+  };
+
+  const submitGoogleStepUp = async (credential?: string) => {
+    if (!stepUpRequest || !credential) {
+      toast.error('Google re-authentication failed');
+      return;
+    }
+
+    setStepUpRequest({ ...stepUpRequest, isSubmitting: true });
+    try {
+      await api.post('/auth/step-up', { googleToken: credential });
+      stepUpRequest.resolve();
+      setStepUpRequest(null);
+    } catch (error) {
+      toast.error(errorMessage(error, 'Google re-authentication failed'));
+      setStepUpRequest({ ...stepUpRequest, isSubmitting: false });
     }
   };
 
@@ -1839,20 +1870,41 @@ export function Settings() {
         description={stepUpRequest?.reason}
       >
         <div className="space-y-4">
-          <Input
-            autoFocus
-            label={stepUpRequest?.mode === 'mfa' ? 'Authentication code' : 'Current password'}
-            type={stepUpRequest?.mode === 'mfa' ? 'text' : 'password'}
-            inputMode={stepUpRequest?.mode === 'mfa' ? 'numeric' : undefined}
-            value={stepUpRequest?.value || ''}
-            onChange={event => stepUpRequest && setStepUpRequest({ ...stepUpRequest, value: event.target.value })}
-            onKeyDown={event => {
-              if (event.key === 'Enter') submitStepUp();
-            }}
-          />
+          {stepUpRequest?.mode === 'google' ? (
+            <>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Continue with the same Google account to verify this sensitive action.
+              </p>
+              <div className={stepUpRequest.isSubmitting ? 'pointer-events-none opacity-60' : ''}>
+                <GoogleLogin
+                  onSuccess={credentialResponse => submitGoogleStepUp(credentialResponse.credential)}
+                  onError={() => toast.error('Google re-authentication failed')}
+                  theme="filled_blue"
+                  shape="rectangular"
+                  width="100%"
+                  context="use"
+                  ux_mode="popup"
+                />
+              </div>
+            </>
+          ) : (
+            <Input
+              autoFocus
+              label={stepUpRequest?.mode === 'mfa' ? 'Authentication code' : 'Current password'}
+              type={stepUpRequest?.mode === 'mfa' ? 'text' : 'password'}
+              inputMode={stepUpRequest?.mode === 'mfa' ? 'numeric' : undefined}
+              value={stepUpRequest?.value || ''}
+              onChange={event => stepUpRequest && setStepUpRequest({ ...stepUpRequest, value: event.target.value })}
+              onKeyDown={event => {
+                if (event.key === 'Enter') submitStepUp();
+              }}
+            />
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={closeStepUp}>Cancel</Button>
-            <Button onClick={submitStepUp} isLoading={stepUpRequest?.isSubmitting}>Continue</Button>
+            {stepUpRequest?.mode !== 'google' && (
+              <Button onClick={submitStepUp} isLoading={stepUpRequest?.isSubmitting}>Continue</Button>
+            )}
           </div>
         </div>
       </Modal>

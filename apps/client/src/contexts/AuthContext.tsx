@@ -10,6 +10,10 @@ interface User {
   role: string;
   mfaEnabled?: boolean;
   isEmailVerified?: boolean;
+  authMethods?: {
+    password: boolean;
+    google: boolean;
+  };
 }
 
 interface AuthContextType {

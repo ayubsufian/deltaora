@@ -17,6 +17,7 @@ import {
   generateTokens,
   markSessionReauthenticated,
   REFRESH_TOKEN_COOKIE,
+  STEP_UP_TTL_MS,
   revokeAllUserSessions,
   revokeRefreshToken,
   setAuthCookies,
@@ -77,6 +78,10 @@ const publicUser = (user: any) => ({
   role: user.role,
   mfaEnabled: user.mfaEnabled,
   isEmailVerified: user.isEmailVerified,
+  authMethods: {
+    password: Boolean(user.passwordHash),
+    google: Boolean(user.googleId),
+  },
 });
 
 const createEmailVerificationToken = async (userId: string) => {
@@ -136,6 +141,23 @@ const verifyMfaChallenge = async (
   }
 
   return mfaResult.valid || !!usedRecoveryHash;
+};
+
+const verifyGoogleStepUpToken = async (user: any, token?: string) => {
+  if (!token || !user.googleId) return false;
+
+  const ticket = await googleClient.verifyIdToken({
+    idToken: token,
+    audience: env.GOOGLE_CLIENT_ID,
+  });
+  const payload = ticket.getPayload();
+  if (!payload || !payload.email || !payload.email_verified) return false;
+  if (payload.sub !== user.googleId || payload.email.toLowerCase() !== user.email.toLowerCase()) return false;
+
+  // The Google ID token must be newly issued for this step-up ceremony.
+  if (!payload.iat || Date.now() - payload.iat * 1000 > STEP_UP_TTL_MS) return false;
+
+  return true;
 };
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
@@ -425,7 +447,7 @@ export const stepUp = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const userId = req.user?.userId;
     const sessionId = req.user?.sessionId;
-    const { currentPassword, mfaCode, recoveryCode } = req.body;
+    const { currentPassword, googleToken, mfaCode, recoveryCode } = req.body;
 
     if (!userId || !sessionId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -437,29 +459,38 @@ export const stepUp = async (req: Request, res: Response, next: NextFunction) =>
     }
 
     let mfaVerified = false;
+    let method: 'mfa' | 'password' | 'google' = 'password';
     if (user.mfaEnabled) {
       mfaVerified = await verifyMfaChallenge(user, { mfaCode, recoveryCode });
       if (!mfaVerified) {
         return res.status(401).json({ error: 'Invalid authentication code', code: 'INVALID_MFA' });
       }
+      method = 'mfa';
     } else {
-      if (!user.passwordHash || !currentPassword) {
+      if (currentPassword && user.passwordHash) {
+        const isValid = await argon2.verify(user.passwordHash, currentPassword);
+        if (!isValid) {
+          return res.status(401).json({ error: 'Current password is incorrect', code: 'INVALID_PASSWORD' });
+        }
+        method = 'password';
+      } else if (googleToken && user.googleId) {
+        const isValid = await verifyGoogleStepUpToken(user, googleToken);
+        if (!isValid) {
+          return res.status(401).json({ error: 'Google re-authentication failed', code: 'INVALID_GOOGLE_STEP_UP' });
+        }
+        method = 'google';
+      } else {
         return res.status(400).json({
-          error: 'Enable MFA or use a password-backed account to perform sensitive actions',
+          error: 'Use Google re-authentication, MFA, or a password-backed account to perform sensitive actions',
           code: 'STEP_UP_UNAVAILABLE',
         });
-      }
-
-      const isValid = await argon2.verify(user.passwordHash, currentPassword);
-      if (!isValid) {
-        return res.status(401).json({ error: 'Current password is incorrect', code: 'INVALID_PASSWORD' });
       }
     }
 
     await markSessionReauthenticated(user.id, sessionId, { mfaVerified });
-    await logAuthEvent('auth.step_up_success', { actorId: user.id, metadata: { mfaVerified }, req });
+    await logAuthEvent('auth.step_up_success', { actorId: user.id, metadata: { mfaVerified, method }, req });
 
-    res.json({ message: 'Re-authentication successful', mfaVerified });
+    res.json({ message: 'Re-authentication successful', mfaVerified, method });
   } catch (error) {
     next(error);
   }
@@ -651,6 +682,9 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
         user.isEmailVerified = true;
         await user.save();
         await logAuthEvent('auth.google_linked', { actorId: user.id, req });
+      } else if (user.googleId !== googleId) {
+        await logAuthEvent('auth.google_login_failed', { actorId: user.id, metadata: { reason: 'google_subject_mismatch' }, req });
+        return res.status(401).json({ error: 'Google login failed' });
       }
     }
 
