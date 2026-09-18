@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { UserSession } from '../models/UserSession';
 import { Workspace } from '../models/Workspace';
@@ -302,17 +303,19 @@ export const revokeSession = async (req: Request, res: Response, next: NextFunct
 
 export const revokeOtherSessions = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const currentSessionId = new mongoose.Types.ObjectId(req.user!.sessionId);
     const sessions = await UserSession.find({
       userId: req.user!.userId,
-      _id: { $ne: req.user!.sessionId },
+      _id: { $ne: currentSessionId },
       revokedAt: { $exists: false },
     }).select('_id');
+    const sessionIds = sessions.map(session => session.id);
 
     await UserSession.updateMany(
-      { userId: req.user!.userId, _id: { $ne: req.user!.sessionId }, revokedAt: { $exists: false } },
+      { userId: req.user!.userId, _id: { $in: sessions.map(session => session._id) }, revokedAt: { $exists: false } },
       { $set: { revokedAt: new Date(), revokedReason: 'user_revoked_all_other' } }
     );
-    await removeRefreshTokenKeys(sessions.map(session => session.id));
+    await removeRefreshTokenKeys(sessionIds);
     await logAuthEvent('auth.other_sessions_revoked', { actorId: req.user!.userId, req });
     res.json({ message: 'Other sessions revoked', revokedCount: sessions.length });
   } catch (error) {
