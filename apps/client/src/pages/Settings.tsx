@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
   Camera,
   Copy,
   Download,
   KeyRound,
   Moon,
+  Plus,
+  RefreshCw,
   ShieldCheck,
   Sun,
   Trash2,
@@ -174,6 +179,17 @@ const defaultCrawlerDefaults: CrawlerDefaults = {
   screenshotDiff: false,
   includeFeeds: true,
 };
+
+const roleTone: Record<WorkspaceSummary['role'], string> = {
+  owner: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900',
+  editor: 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900',
+  viewer: 'bg-gray-100 text-gray-700 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700',
+};
+
+function roleLabel(role?: WorkspaceSummary['role'] | Member['role']) {
+  if (!role) return 'Member';
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
 
 function errorMessage(error: unknown, fallback: string) {
   const err = error as { response?: { data?: { error?: string; details?: string[] } } };
@@ -375,8 +391,12 @@ export function Settings() {
   const [avatarError, setAvatarError] = useState('');
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
+  const [workspacesError, setWorkspacesError] = useState('');
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings | null>(null);
+  const [isLoadingWorkspaceSettings, setIsLoadingWorkspaceSettings] = useState(false);
+  const [workspaceSettingsError, setWorkspaceSettingsError] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -414,11 +434,20 @@ export function Settings() {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [workspaceAction, setWorkspaceAction] = useState<'create' | 'save' | 'transfer' | 'delete' | 'member' | 'invite' | null>(null);
 
+  const activeWorkspace = useMemo(() => {
+    return workspaces.find(workspace => workspace.id === activeWorkspaceId) || null;
+  }, [activeWorkspaceId, workspaces]);
   const isOwner = useMemo(() => {
     return user?.role === 'admin' || members.some(member => member.id === user?.id && member.role === 'owner');
   }, [members, user?.id, user?.role]);
   const hasOtherSessions = useMemo(() => sessions.some(session => !session.current), [sessions]);
+  const workspaceNameError = useMemo(() => {
+    const length = newWorkspaceName.trim().length;
+    return length > 0 && length < 2 ? 'Use at least 2 characters.' : undefined;
+  }, [newWorkspaceName]);
+  const activeOwnerCount = useMemo(() => members.filter(member => member.role === 'owner').length, [members]);
 
   useEffect(() => {
     setProfileName(user?.name || '');
@@ -427,16 +456,31 @@ export function Settings() {
     setMfaEnabled(Boolean(user?.mfaEnabled));
   }, [user]);
 
-  const fetchWorkspaces = useCallback(async () => {
+  const fetchWorkspaces = useCallback(async (preferredWorkspaceId?: string | null) => {
+    setIsLoadingWorkspaces(true);
+    setWorkspacesError('');
     try {
       const res = await api.get('/workspaces');
-      const data = res.data || [];
+      const data: WorkspaceSummary[] = res.data || [];
       setWorkspaces(data);
-      if (!activeWorkspaceId && data[0]?.id) {
-        setActiveWorkspaceId(data[0].id);
+
+      const nextWorkspaceId =
+        (preferredWorkspaceId && data.some(workspace => workspace.id === preferredWorkspaceId) && preferredWorkspaceId) ||
+        (activeWorkspaceId && data.some(workspace => workspace.id === activeWorkspaceId) && activeWorkspaceId) ||
+        data[0]?.id ||
+        null;
+
+      if (nextWorkspaceId !== activeWorkspaceId) {
+        setActiveWorkspaceId(nextWorkspaceId);
       }
-    } catch {
+
+      return data;
+    } catch (error) {
       setWorkspaces([]);
+      setWorkspacesError(errorMessage(error, 'Could not load workspaces.'));
+      return [];
+    } finally {
+      setIsLoadingWorkspaces(false);
     }
   }, [activeWorkspaceId, setActiveWorkspaceId]);
 
@@ -462,6 +506,8 @@ export function Settings() {
 
   const fetchWorkspaceSettings = useCallback(async () => {
     if (!activeWorkspaceId) return;
+    setIsLoadingWorkspaceSettings(true);
+    setWorkspaceSettingsError('');
     try {
       const res = await api.get(`/workspaces/${activeWorkspaceId}/settings`);
       setWorkspaceSettings({
@@ -470,7 +516,12 @@ export function Settings() {
         notificationDefaults: res.data.notificationDefaults || { minimumImportance: 'medium' },
       });
     } catch (error) {
-      toast.error(errorMessage(error, 'Failed to load workspace settings'));
+      const message = errorMessage(error, 'Failed to load workspace settings');
+      setWorkspaceSettingsError(message);
+      setWorkspaceSettings(null);
+      toast.error(message);
+    } finally {
+      setIsLoadingWorkspaceSettings(false);
     }
   }, [activeWorkspaceId]);
 
@@ -545,12 +596,28 @@ export function Settings() {
   }, [fetchCrawlerSessions, fetchPasskeys, fetchPreferences, fetchSessions, fetchWorkspaces]);
 
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    setMembers([]);
+    setPendingInvites([]);
+    setWorkspaceSettings(null);
+    setWorkspaceSettingsError('');
+    setTransferOwnerId('');
+    setInviteToken('');
+
+    if (!activeWorkspaceId) {
+      setIsLoadingWorkspaceSettings(false);
+      return;
+    }
+
     fetchMembers();
     fetchInvites();
     fetchWorkspaceSettings();
     fetchAuditLogs(1);
   }, [activeWorkspaceId, fetchAuditLogs, fetchInvites, fetchMembers, fetchWorkspaceSettings]);
+
+  const selectWorkspace = (workspaceId: string) => {
+    if (workspaceId === activeWorkspaceId) return;
+    setActiveWorkspaceId(workspaceId);
+  };
 
   const requestStepUp = useCallback((options: { requireMfa?: boolean; reason: string }) => {
     const mustUseMfa = options.requireMfa || mfaEnabled || user?.role === 'admin';
@@ -685,6 +752,7 @@ export function Settings() {
   const saveWorkspaceSettings = async () => {
     if (!activeWorkspaceId || !workspaceSettings) return;
     setIsSaving(true);
+    setWorkspaceAction('save');
     try {
       await requestStepUp({ reason: 'Update workspace crawler and notification policy' });
       const res = await api.patch(`/workspaces/${activeWorkspaceId}/settings`, {
@@ -693,6 +761,9 @@ export function Settings() {
         notificationDefaults: workspaceSettings.notificationDefaults,
       });
       setWorkspaceSettings({ ...workspaceSettings, ...res.data });
+      setWorkspaces(current => current.map(workspace => (
+        workspace.id === activeWorkspaceId ? { ...workspace, name: res.data.name || workspace.name } : workspace
+      )));
       toast.success('Workspace settings saved');
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
@@ -700,6 +771,7 @@ export function Settings() {
       }
     } finally {
       setIsSaving(false);
+      setWorkspaceAction(null);
     }
   };
 
@@ -915,6 +987,7 @@ export function Settings() {
 
   const generateInvite = async () => {
     if (!activeWorkspaceId) return;
+    setWorkspaceAction('invite');
     try {
       await requestStepUp({ reason: 'Invite a workspace member' });
       const payload = { role: inviteRole, ...(inviteEmail.trim() ? { email: inviteEmail.trim() } : {}) };
@@ -927,39 +1000,47 @@ export function Settings() {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to generate invite'));
       }
+    } finally {
+      setWorkspaceAction(null);
     }
   };
 
   const createWorkspace = async () => {
     const name = newWorkspaceName.trim();
-    if (!name) return;
+    if (name.length < 2) return;
+    setWorkspaceAction('create');
     try {
       await requestStepUp({ reason: 'Create a workspace' });
       const res = await api.post('/workspaces', { name });
       setNewWorkspaceName('');
-      setWorkspaces(current => [...current, res.data]);
       setActiveWorkspaceId(res.data.id);
+      await fetchWorkspaces(res.data.id);
       toast.success('Workspace created');
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to create workspace'));
       }
+    } finally {
+      setWorkspaceAction(null);
     }
   };
 
   const transferWorkspaceOwnership = async () => {
     if (!activeWorkspaceId || !transferOwnerId) return;
+    setWorkspaceAction('transfer');
     try {
       await requestStepUp({ reason: 'Transfer workspace ownership' });
       await api.post(`/workspaces/${activeWorkspaceId}/transfer-ownership`, { userId: transferOwnerId });
       toast.success('Ownership transferred');
       setTransferOwnerId('');
       fetchMembers();
-      fetchWorkspaces();
+      fetchWorkspaces(activeWorkspaceId);
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to transfer ownership'));
       }
+    } finally {
+      setWorkspaceAction(null);
     }
   };
 
@@ -972,12 +1053,19 @@ export function Settings() {
       confirmationValue: '',
       actionLabel: 'Delete workspace',
       onConfirm: async () => {
-        await requestStepUp({ reason: 'Delete workspace' });
-        await api.delete(`/workspaces/${activeWorkspaceId}`);
-        const remaining = workspaces.filter(workspace => workspace.id !== activeWorkspaceId);
-        setWorkspaces(remaining);
-        setActiveWorkspaceId(remaining[0]?.id || null);
-        toast.success('Workspace deleted');
+        setWorkspaceAction('delete');
+        try {
+          await requestStepUp({ reason: 'Delete workspace' });
+          await api.delete(`/workspaces/${activeWorkspaceId}`);
+          const remaining = workspaces.filter(workspace => workspace.id !== activeWorkspaceId);
+          setWorkspaces(remaining);
+          const nextWorkspaceId = remaining[0]?.id || null;
+          setActiveWorkspaceId(nextWorkspaceId);
+          await fetchWorkspaces(nextWorkspaceId);
+          toast.success('Workspace deleted');
+        } finally {
+          setWorkspaceAction(null);
+        }
       },
     });
   };
@@ -1011,16 +1099,19 @@ export function Settings() {
 
   const updateRole = async (memberId: string, role: string) => {
     if (!activeWorkspaceId) return;
+    setWorkspaceAction('member');
     try {
       await requestStepUp({ reason: 'Change a member role' });
       await api.patch(`/workspaces/${activeWorkspaceId}/members/${memberId}`, { role });
       toast.success('Role updated');
       fetchMembers();
-      fetchWorkspaces();
+      fetchWorkspaces(activeWorkspaceId);
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to update role'));
       }
+    } finally {
+      setWorkspaceAction(null);
     }
   };
 
@@ -1030,11 +1121,22 @@ export function Settings() {
     actionLabel: member.id === user?.id ? 'Leave workspace' : 'Remove member',
     onConfirm: async () => {
       if (!activeWorkspaceId) return;
-      await requestStepUp({ reason: 'Remove a workspace member' });
-      await api.delete(`/workspaces/${activeWorkspaceId}/members/${member.id}`);
-      toast.success(member.id === user?.id ? 'You left the workspace' : 'Member removed');
-      fetchMembers();
-      fetchWorkspaces();
+      setWorkspaceAction('member');
+      try {
+        await requestStepUp({ reason: 'Remove a workspace member' });
+        await api.delete(`/workspaces/${activeWorkspaceId}/members/${member.id}`);
+        toast.success(member.id === user?.id ? 'You left the workspace' : 'Member removed');
+        if (member.id === user?.id) {
+          const nextWorkspaceId = workspaces.find(workspace => workspace.id !== activeWorkspaceId)?.id || null;
+          setActiveWorkspaceId(nextWorkspaceId);
+          await fetchWorkspaces(nextWorkspaceId);
+        } else {
+          fetchMembers();
+          fetchWorkspaces(activeWorkspaceId);
+        }
+      } finally {
+        setWorkspaceAction(null);
+      }
     },
   });
 
@@ -1222,48 +1324,147 @@ export function Settings() {
       <Section title="Workspace" description="Manage workspace access, ownership, and defaults for newly monitored websites.">
         <Card>
           <CardContent className="space-y-6 pt-6">
-            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-              <Select
-                label="Active workspace"
-                value={activeWorkspaceId || ''}
-                onChange={event => setActiveWorkspaceId(event.target.value)}
-                options={workspaces.map(workspace => ({
-                  label: `${workspace.name} (${workspace.role})`,
-                  value: workspace.id,
-                }))}
-                disabled={workspaces.length === 0}
-              />
-              <Input
-                label="New workspace"
-                value={newWorkspaceName}
-                onChange={event => setNewWorkspaceName(event.target.value)}
-                placeholder="Marketing monitors"
-                maxLength={100}
-              />
-              <div className="flex items-end">
-                <Button onClick={createWorkspace} disabled={!newWorkspaceName.trim()}>Create</Button>
+            <p className="sr-only" aria-live="polite">
+              {activeWorkspace ? `${activeWorkspace.name} workspace selected.` : 'No workspace selected.'}
+            </p>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+              <div className="rounded-md border border-gray-200 dark:border-gray-800">
+                <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-950 dark:text-white">Workspaces</div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{workspaces.length} available</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchWorkspaces(activeWorkspaceId)}
+                    isLoading={isLoadingWorkspaces}
+                    aria-label="Refresh workspaces"
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+                  </Button>
+                </div>
+
+                {workspacesError && (
+                  <div className="m-4 flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{workspacesError}</span>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => fetchWorkspaces(activeWorkspaceId)}>Retry</Button>
+                  </div>
+                )}
+
+                {isLoadingWorkspaces && workspaces.length === 0 ? (
+                  <div className="space-y-2 p-4" aria-label="Loading workspaces">
+                    {[0, 1, 2].map(item => (
+                      <div key={item} className="h-16 animate-pulse rounded-md bg-gray-100 dark:bg-gray-800" />
+                    ))}
+                  </div>
+                ) : workspaces.length === 0 && !workspacesError ? (
+                  <div className="p-6 text-center">
+                    <Building2 className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
+                    <p className="mt-2 text-sm font-medium text-gray-950 dark:text-white">No workspaces yet</p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create one to start monitoring pages with a team.</p>
+                  </div>
+                ) : (
+                  <ul className="max-h-80 space-y-2 overflow-y-auto p-3" role="list" aria-label="Workspace list">
+                    {workspaces.map(workspace => {
+                      const isActive = workspace.id === activeWorkspaceId;
+                      return (
+                        <li key={workspace.id}>
+                          <button
+                            type="button"
+                            aria-pressed={isActive}
+                            onClick={() => selectWorkspace(workspace.id)}
+                            className={`flex min-h-16 w-full items-center gap-3 rounded-md border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950 ${
+                              isActive
+                                ? 'border-blue-500 bg-blue-50 text-blue-950 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100'
+                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900'
+                            }`}
+                          >
+                            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${
+                              isActive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300'
+                            }`}>
+                              {isActive ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> : <Building2 className="h-5 w-5" aria-hidden="true" />}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-semibold text-gray-950 dark:text-white">{workspace.name}</span>
+                              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                <span className={`rounded-full px-2 py-0.5 font-medium ring-1 ${roleTone[workspace.role]}`}>
+                                  {roleLabel(workspace.role)}
+                                </span>
+                                <span>{workspace.memberCount} {workspace.memberCount === 1 ? 'member' : 'members'}</span>
+                                <span>Created {formatDate(workspace.createdAt)}</span>
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
+
+              <form
+                className="rounded-md border border-gray-200 p-4 dark:border-gray-800"
+                onSubmit={event => {
+                  event.preventDefault();
+                  createWorkspace();
+                }}
+              >
+                <Input
+                  label="New workspace"
+                  value={newWorkspaceName}
+                  onChange={event => setNewWorkspaceName(event.target.value)}
+                  placeholder="Marketing monitors"
+                  maxLength={100}
+                  error={workspaceNameError}
+                />
+                <Button
+                  type="submit"
+                  className="mt-3 w-full"
+                  isLoading={workspaceAction === 'create'}
+                  disabled={Boolean(workspaceNameError) || newWorkspaceName.trim().length < 2}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Create workspace
+                </Button>
+              </form>
             </div>
-            {workspaceSettings && (
+
+            {(workspaceSettings || isLoadingWorkspaceSettings || workspaceSettingsError) && (
               <div className="grid gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:grid-cols-3">
                 <div>
                   <div className="text-xs uppercase text-gray-500">Members</div>
-                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{members.length}</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{isLoadingWorkspaceSettings ? 'Loading' : members.length}</div>
                 </div>
                 <div>
                   <div className="text-xs uppercase text-gray-500">Monitored pages</div>
-                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{workspaceSettings.pageCount}</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{workspaceSettings?.pageCount ?? (isLoadingWorkspaceSettings ? 'Loading' : 'Unavailable')}</div>
                 </div>
                 <div>
                   <div className="text-xs uppercase text-gray-500">Your role</div>
-                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{workspaces.find(workspace => workspace.id === activeWorkspaceId)?.role || 'member'}</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{roleLabel(activeWorkspace?.role)}</div>
                 </div>
               </div>
             )}
+
+            {workspaceSettingsError && (
+              <div className="flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{workspaceSettingsError}</span>
+                </div>
+                <Button variant="outline" onClick={fetchWorkspaceSettings}>Retry</Button>
+              </div>
+            )}
+
             <Input
               label="Workspace name"
               value={workspaceSettings?.name || ''}
               disabled={!workspaceSettings || !isOwner}
+              error={workspaceSettings && workspaceSettings.name.trim().length < 2 ? 'Use at least 2 characters.' : undefined}
               onChange={event => workspaceSettings && setWorkspaceSettings({ ...workspaceSettings, name: event.target.value })}
             />
             <SettingRow title="Respect robots.txt" description="Keep conservative public-site crawling enabled by default.">
@@ -1338,7 +1539,11 @@ export function Settings() {
               />
             </SettingRow>
             <div className="flex justify-end">
-              <Button onClick={saveWorkspaceSettings} isLoading={isSaving} disabled={!workspaceSettings || !isOwner}>
+              <Button
+                onClick={saveWorkspaceSettings}
+                isLoading={isSaving && workspaceAction === 'save'}
+                disabled={!workspaceSettings || !isOwner || workspaceSettings.name.trim().length < 2}
+              >
                 Save workspace policy
               </Button>
             </div>
@@ -1357,13 +1562,26 @@ export function Settings() {
                   disabled={!isOwner || members.length <= 1}
                 />
                 <div className="flex items-end">
-                  <Button variant="outline" onClick={transferWorkspaceOwnership} disabled={!isOwner || !transferOwnerId}>
+                  <Button
+                    variant="outline"
+                    onClick={transferWorkspaceOwnership}
+                    isLoading={workspaceAction === 'transfer'}
+                    disabled={!isOwner || !transferOwnerId}
+                  >
                     Transfer ownership
                   </Button>
                 </div>
               </div>
-              <div className="mt-4 flex justify-end">
-                <Button variant="destructive" onClick={deleteWorkspace} disabled={!isOwner || workspaces.length <= 1 || !workspaceSettings}>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                {activeWorkspace && workspaces.length <= 1 && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Create or join another workspace before deleting this one.</p>
+                )}
+                <Button
+                  variant="destructive"
+                  onClick={deleteWorkspace}
+                  isLoading={workspaceAction === 'delete'}
+                  disabled={!isOwner || workspaces.length <= 1 || !workspaceSettings}
+                >
                   Delete workspace
                 </Button>
               </div>
@@ -1390,11 +1608,21 @@ export function Settings() {
                       aria-label={`Role for ${member.email}`}
                       className="min-w-32"
                       value={member.role}
-                      disabled={!isOwner}
+                      disabled={!isOwner || workspaceAction === 'member' || (member.role === 'owner' && activeOwnerCount <= 1)}
                       onChange={event => updateRole(member.id, event.target.value)}
                       options={roleOptions}
                     />
-                    <Button variant="outline" onClick={() => removeMember(member)} disabled={!isOwner && member.id !== user?.id}>
+                    <Button
+                      variant="outline"
+                      onClick={() => removeMember(member)}
+                      isLoading={workspaceAction === 'member'}
+                      disabled={
+                        workspaceAction === 'member' ||
+                        (member.id === user?.id
+                          ? workspaces.length <= 1 || (member.role === 'owner' && activeOwnerCount <= 1)
+                          : !isOwner || (member.role === 'owner' && activeOwnerCount <= 1))
+                      }
+                    >
                       {member.id === user?.id ? 'Leave' : 'Remove'}
                     </Button>
                   </div>
@@ -1405,7 +1633,7 @@ export function Settings() {
               <Input label="Invite email" type="email" placeholder="teammate@example.com" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} />
               <Select label="Role" value={inviteRole} onChange={event => setInviteRole(event.target.value as 'editor' | 'viewer')} options={roleOptions.filter(option => option.value !== 'owner')} />
               <div className="flex items-end">
-                <Button onClick={generateInvite} disabled={!isOwner}>Invite</Button>
+                <Button onClick={generateInvite} isLoading={workspaceAction === 'invite'} disabled={!isOwner}>Invite</Button>
               </div>
             </div>
             {inviteToken && (
