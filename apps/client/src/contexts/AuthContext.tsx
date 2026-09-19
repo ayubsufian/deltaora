@@ -19,7 +19,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   activeWorkspaceId: string | null;
-  setActiveWorkspaceId: (id: string) => void;
+  setActiveWorkspaceId: (id: string | null) => void;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string, mfaCode?: string, recoveryCode?: string) => Promise<void>;
@@ -37,7 +37,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string | null>(() => localStorage.getItem('activeWorkspaceId'));
   const [isLoading, setIsLoading] = useState(true);
 
-  const setActiveWorkspaceId = useCallback((id: string) => {
+  const setActiveWorkspaceId = useCallback((id: string | null) => {
+    if (!id) {
+      localStorage.removeItem('activeWorkspaceId');
+      delete api.defaults.headers.common['x-workspace-id'];
+      setActiveWorkspaceIdState(null);
+      return;
+    }
+
     localStorage.setItem('activeWorkspaceId', id);
     setActiveWorkspaceIdState(id);
     api.defaults.headers.common['x-workspace-id'] = id;

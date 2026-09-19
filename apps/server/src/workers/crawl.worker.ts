@@ -82,7 +82,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
     const crawlStatus = shouldManualReview ? CrawlStatus.MANUAL_REVIEW : baseCrawlStatus;
     const recommendation =
       crawlStatus === CrawlStatus.MANUAL_REVIEW
-        ? 'Review the site manually or use an official API/webhook; Deltaora detected an access block and will not bypass anti-bot controls.'
+        ? 'Review the site manually or use an authorized data source; Deltaora detected an access block and will not bypass anti-bot controls.'
         : crawlStatus === CrawlStatus.AUTH_REQUIRED
           ? 'Connect a recorded auth session or provide authorized cookies/storage state for this workspace.'
           : crawlStatus === CrawlStatus.UNSUPPORTED

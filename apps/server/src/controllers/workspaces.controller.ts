@@ -6,14 +6,155 @@ import { ForbiddenError } from '@casl/ability';
 import mongoose from 'mongoose';
 import { logAuditEvent } from '../services/audit.service';
 import { AuditLog } from '../models/AuditLog';
-import { ApiKey } from '../models/ApiKey';
 import { MonitoredPage } from '../models/MonitoredPage';
-import { WebhookEndpoint } from '../models/WebhookEndpoint';
+import { Snapshot } from '../models/Snapshot';
+import { Diff } from '../models/Diff';
+import { AISummary } from '../models/AISummary';
+import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
 import { sendEmail } from '../services/email.service';
 import { workspaceInviteEmail } from '../utils/emailTemplates';
 import { WorkspaceInvite } from '../models/WorkspaceInvite';
-import { encryptSecret, randomToken, sha256 } from '../services/security.service';
-import { assertSafeScrapeUrl } from '../services/urlSafety.service';
+import { randomToken, sha256 } from '../services/security.service';
+
+const workspaceSummary = (workspace: any, userId: string) => ({
+  id: workspace.id,
+  name: workspace.name,
+  role: workspace.members.find((member: any) => member.userId.toString() === userId)?.role,
+  ownerId: workspace.ownerId.toString(),
+  memberCount: workspace.members.length,
+  createdAt: workspace.createdAt,
+});
+
+export const listWorkspaces = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaces = await Workspace.find({ 'members.userId': req.user!.userId }).sort({ createdAt: 1 });
+    res.json(workspaces.map(workspace => workspaceSummary(workspace, req.user!.userId)));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createWorkspace = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = req.body.name.trim();
+    const workspace = await Workspace.create({
+      name,
+      ownerId: req.user!.userId,
+      members: [{ userId: req.user!.userId, role: 'owner', joinedAt: new Date() }],
+    });
+
+    await logAuditEvent({
+      workspaceId: workspace.id,
+      actorId: req.user!.userId,
+      action: 'workspace.created',
+      metadata: { name },
+      req,
+    });
+
+    res.status(201).json(workspaceSummary(workspace, req.user!.userId));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const transferWorkspaceOwnership = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+    const { userId } = req.body;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) return res.status(404).json({ error: 'Workspace not found' });
+
+    const currentOwner = workspace.members.find(member => member.userId.toString() === req.user!.userId);
+    if (!currentOwner || currentOwner.role !== 'owner') {
+      return res.status(403).json({ error: 'Only a workspace owner can transfer ownership' });
+    }
+
+    const nextOwner = workspace.members.find(member => member.userId.toString() === userId);
+    if (!nextOwner) return res.status(404).json({ error: 'Target user is not a workspace member' });
+
+    const previousOwnerId = workspace.ownerId.toString();
+    workspace.ownerId = new mongoose.Types.ObjectId(userId);
+    nextOwner.role = 'owner';
+    currentOwner.role = 'owner';
+    await workspace.save();
+
+    await logAuditEvent({
+      workspaceId,
+      actorId: req.user!.userId,
+      action: 'workspace.ownership_transferred',
+      resourceId: userId,
+      metadata: { previousOwnerId, newOwnerId: userId },
+      req,
+    });
+
+    res.json({ message: 'Workspace ownership transferred' });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const deleteWorkspace = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+
+    if (!workspaceId) {
+      return res.status(400).json({ error: 'No workspace context' });
+    }
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) return res.status(404).json({ error: 'Workspace not found' });
+
+    const requester = workspace.members.find(member => member.userId.toString() === req.user!.userId);
+    if (!requester || requester.role !== 'owner') {
+      return res.status(403).json({ error: 'Only a workspace owner can delete this workspace' });
+    }
+
+    const remainingWorkspaceCount = await Workspace.countDocuments({ 'members.userId': req.user!.userId, _id: { $ne: workspace._id } });
+    if (remainingWorkspaceCount === 0) {
+      return res.status(400).json({ error: 'Create or join another workspace before deleting your last workspace' });
+    }
+
+    const relatedDiffs = await Diff.find({ workspaceId }).select('_id');
+    const diffIds = relatedDiffs.map(diff => diff._id);
+
+    await logAuditEvent({
+      workspaceId,
+      actorId: req.user!.userId,
+      action: 'workspace.deleted',
+      metadata: { name: workspace.name },
+      req,
+    });
+
+    await Promise.all([
+      MonitoredPage.deleteMany({ workspaceId }),
+      Snapshot.deleteMany({ workspaceId }),
+      Diff.deleteMany({ workspaceId }),
+      AISummary.deleteMany({ workspaceId, ...(diffIds.length > 0 ? { diffId: { $in: diffIds } } : {}) }),
+      CrawlerAuthSession.deleteMany({ workspaceId }),
+      WorkspaceInvite.deleteMany({ workspaceId }),
+      Workspace.deleteOne({ _id: workspaceId }),
+    ]);
+
+    res.json({ message: 'Workspace deleted' });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
 
 export const getMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -70,8 +211,6 @@ export const getWorkspaceSettings = async (req: Request, res: Response, next: Ne
     res.json({
       id: workspace.id,
       name: workspace.name,
-      plan: workspace.plan,
-      maxPages: workspace.maxPages,
       pageCount,
       crawlerDefaults: workspace.crawlerDefaults,
       notificationDefaults: workspace.notificationDefaults,
@@ -126,8 +265,6 @@ export const updateWorkspaceSettings = async (req: Request, res: Response, next:
     res.json({
       id: workspace.id,
       name: workspace.name,
-      plan: workspace.plan,
-      maxPages: workspace.maxPages,
       crawlerDefaults: workspace.crawlerDefaults,
       notificationDefaults: workspace.notificationDefaults,
     });
@@ -196,6 +333,14 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
       return res.json({ inviteToken, expiresIn: '48h', emailSent: true });
     }
 
+    await logAuditEvent({
+      workspaceId: workspaceId as string,
+      actorId: req.user!.userId,
+      action: 'member.invited',
+      metadata: { role, method: 'link' },
+      req,
+    });
+
     res.json({ inviteToken, expiresIn: '48h', emailSent: false });
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
@@ -205,6 +350,138 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+export const listInvites = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const invites = await WorkspaceInvite.find({
+      workspaceId,
+      acceptedAt: { $exists: false },
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    })
+      .populate('inviterId', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(invites.map(invite => ({
+      id: invite.id,
+      inviteeEmail: invite.inviteeEmail || null,
+      role: invite.role,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+      inviter: invite.inviterId
+        ? {
+            id: (invite.inviterId as any)._id,
+            name: (invite.inviterId as any).name,
+            email: (invite.inviterId as any).email,
+          }
+        : null,
+    })));
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const revokeInvite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const invite = await WorkspaceInvite.findOneAndUpdate(
+      {
+        _id: req.params.inviteId,
+        workspaceId,
+        acceptedAt: { $exists: false },
+        revokedAt: { $exists: false },
+      },
+      { $set: { revokedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!invite) return res.status(404).json({ error: 'Invite not found' });
+
+    await logAuditEvent({
+      workspaceId,
+      actorId: req.user!.userId,
+      action: 'member.invite_revoked',
+      resourceId: invite.id,
+      metadata: { email: invite.inviteeEmail, role: invite.role },
+      req,
+    });
+
+    res.json({ message: 'Invite revoked' });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
+
+export const resendInvite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const workspaceId = req.workspaceId;
+    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
+
+    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+
+    const invite = await WorkspaceInvite.findOne({
+      _id: req.params.inviteId,
+      workspaceId,
+      acceptedAt: { $exists: false },
+      revokedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+    });
+
+    if (!invite) return res.status(404).json({ error: 'Invite not found' });
+    if (!invite.inviteeEmail) return res.status(400).json({ error: 'Only email invites can be resent' });
+
+    const inviteToken = randomToken(32);
+    invite.tokenHash = sha256(inviteToken);
+    invite.expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    await invite.save();
+
+    const [inviter, workspace] = await Promise.all([
+      User.findById(req.user!.userId),
+      Workspace.findById(workspaceId),
+    ]);
+
+    await sendEmail({
+      to: invite.inviteeEmail,
+      subject: `Reminder: you've been invited to ${workspace?.name || 'a workspace'} on Deltaora`,
+      htmlContent: workspaceInviteEmail(
+        inviter?.name || 'A team member',
+        workspace?.name || 'a workspace',
+        `${env.CLIENT_URL}/join?token=${inviteToken}`,
+        env.CLIENT_URL
+      ),
+    });
+
+    await logAuditEvent({
+      workspaceId,
+      actorId: req.user!.userId,
+      action: 'member.invite_resent',
+      resourceId: invite.id,
+      metadata: { email: invite.inviteeEmail, role: invite.role },
+      req,
+    });
+
+    res.json({ message: 'Invite resent', expiresIn: '48h' });
+  } catch (error: unknown) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
+    }
+    next(error);
+  }
+};
 
 export const joinWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -288,29 +565,57 @@ export const updateMemberRole = async (req: Request, res: Response, next: NextFu
       return res.status(400).json({ error: 'Invalid role' });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
     const workspace = await Workspace.findById(workspaceId);
     if (!workspace) {
       return res.status(404).json({ error: 'Workspace not found' });
     }
 
-    // Prevent changing the last owner's role
-    if (role !== 'owner') {
-      const ownerCount = workspace.members.filter(m => m.role === 'owner').length;
-      const targetMember = workspace.members.find(m => m.userId.toString() === userId);
-      
-      if (targetMember?.role === 'owner' && ownerCount <= 1) {
-        return res.status(400).json({ error: 'Cannot change role of the last owner in the workspace' });
-      }
-    }
-
-    const memberIndex = workspace.members.findIndex(m => m.userId.toString() === userId);
-    if (memberIndex === -1) {
+    const targetMember = workspace.members.find(m => m.userId.toString() === userId);
+    if (!targetMember) {
       return res.status(404).json({ error: 'User is not a member of this workspace' });
     }
 
-    const previousRole = workspace.members[memberIndex].role;
-    workspace.members[memberIndex].role = role;
-    await workspace.save();
+    const ownerCount = workspace.members.filter(m => m.role === 'owner').length;
+    if (targetMember.role === 'owner' && role !== 'owner' && ownerCount <= 1) {
+      return res.status(400).json({ error: 'Cannot change role of the last owner in the workspace' });
+    }
+
+    const targetUserId = new mongoose.Types.ObjectId(userId);
+    const updateFilter: any = {
+      _id: workspaceId,
+      members: { $elemMatch: { userId: targetUserId } },
+    };
+
+    if (targetMember.role === 'owner' && role !== 'owner') {
+      updateFilter.$expr = {
+        $gt: [
+          {
+            $size: {
+              $filter: {
+                input: '$members',
+                as: 'member',
+                cond: { $eq: ['$$member.role', 'owner'] },
+              },
+            },
+          },
+          1,
+        ],
+      };
+    }
+
+    const update = await Workspace.updateOne(
+      updateFilter,
+      { $set: { 'members.$[member].role': role } },
+      { arrayFilters: [{ 'member.userId': targetUserId }] }
+    );
+
+    if (update.modifiedCount === 0 && targetMember.role !== role) {
+      return res.status(409).json({ error: 'Member role changed concurrently. Refresh and try again.' });
+    }
     
     // Log Audit Event
     await logAuditEvent({
@@ -318,7 +623,7 @@ export const updateMemberRole = async (req: Request, res: Response, next: NextFu
       actorId: req.user!.userId,
       action: 'role.changed',
       resourceId: userId,
-      metadata: { previousRole, newRole: role },
+      metadata: { previousRole: targetMember.role, newRole: role },
       req
     });
 
@@ -341,9 +646,20 @@ export const removeMember = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ error: 'No workspace context' });
     }
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
     // Users can remove themselves, otherwise they need 'manage' capability
     if (userId !== requesterId) {
       ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
+    }
+
+    if (userId === requesterId) {
+      const remainingWorkspaceCount = await Workspace.countDocuments({ 'members.userId': requesterId, _id: { $ne: workspaceId } });
+      if (remainingWorkspaceCount === 0) {
+        return res.status(400).json({ error: 'Create or join another workspace before leaving your last workspace' });
+      }
     }
 
     const workspace = await Workspace.findById(workspaceId);
@@ -364,8 +680,44 @@ export const removeMember = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
-    workspace.members = workspace.members.filter(m => m.userId.toString() !== userId);
-    await workspace.save();
+    const targetUserId = new mongoose.Types.ObjectId(userId);
+    const updateFilter: any = {
+      _id: workspaceId,
+      members: { $elemMatch: { userId: targetUserId } },
+    };
+
+    if (memberToRemove.role === 'owner') {
+      updateFilter.$expr = {
+        $gt: [
+          {
+            $size: {
+              $filter: {
+                input: '$members',
+                as: 'member',
+                cond: { $eq: ['$$member.role', 'owner'] },
+              },
+            },
+          },
+          1,
+        ],
+      };
+    }
+
+    const nextPrimaryOwner = workspace.ownerId.toString() === userId
+      ? workspace.members.find(member => member.role === 'owner' && member.userId.toString() !== userId)
+      : null;
+
+    const update = await Workspace.updateOne(
+      updateFilter,
+      {
+        $pull: { members: { userId: targetUserId } },
+        ...(nextPrimaryOwner ? { $set: { ownerId: nextPrimaryOwner.userId } } : {}),
+      }
+    );
+
+    if (update.modifiedCount === 0) {
+      return res.status(409).json({ error: 'Workspace membership changed concurrently. Refresh and try again.' });
+    }
     
     // Log Audit Event
     await logAuditEvent({
@@ -378,221 +730,6 @@ export const removeMember = async (req: Request, res: Response, next: NextFuncti
     });
 
     res.json({ message: 'Member removed successfully' });
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const listWebhooks = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const webhooks = await WebhookEndpoint.find({ workspaceId }).sort({ createdAt: -1 });
-    res.json(webhooks);
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const createWebhook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-    const safeUrl = await assertSafeScrapeUrl(req.body.url, 'Webhook URL');
-
-    const webhook = await WebhookEndpoint.create({
-      workspaceId,
-      createdBy: req.user!.userId,
-      name: req.body.name,
-      url: safeUrl.href,
-      events: req.body.events,
-      secretEncrypted: req.body.secret ? encryptSecret(req.body.secret) : undefined,
-      isActive: true,
-    });
-
-    await logAuditEvent({
-      workspaceId: workspaceId as string,
-      actorId: req.user!.userId,
-      action: 'webhook.created',
-      resourceId: webhook.id,
-      metadata: { name: webhook.name, url: webhook.url, events: webhook.events },
-      req,
-    });
-
-    res.status(201).json(webhook);
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const updateWebhook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const update: any = {};
-    if (typeof req.body.name === 'string') update.name = req.body.name;
-    if (typeof req.body.url === 'string') update.url = (await assertSafeScrapeUrl(req.body.url, 'Webhook URL')).href;
-    if (Array.isArray(req.body.events)) update.events = req.body.events;
-    if (typeof req.body.secret === 'string') update.secretEncrypted = req.body.secret ? encryptSecret(req.body.secret) : undefined;
-    if (typeof req.body.isActive === 'boolean') update.isActive = req.body.isActive;
-
-    const webhook = await WebhookEndpoint.findOneAndUpdate(
-      { _id: req.params.webhookId, workspaceId },
-      { $set: update },
-      { new: true }
-    );
-
-    if (!webhook) return res.status(404).json({ error: 'Webhook not found' });
-
-    await logAuditEvent({
-      workspaceId: workspaceId as string,
-      actorId: req.user!.userId,
-      action: 'webhook.updated',
-      resourceId: webhook.id,
-      metadata: { name: webhook.name, url: webhook.url, events: webhook.events, isActive: webhook.isActive },
-      req,
-    });
-
-    res.json(webhook);
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const deleteWebhook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const webhook = await WebhookEndpoint.findOneAndDelete({ _id: req.params.webhookId, workspaceId });
-    if (!webhook) return res.status(404).json({ error: 'Webhook not found' });
-
-    await logAuditEvent({
-      workspaceId: workspaceId as string,
-      actorId: req.user!.userId,
-      action: 'webhook.deleted',
-      resourceId: webhook.id,
-      metadata: { name: webhook.name },
-      req,
-    });
-
-    res.json({ message: 'Webhook deleted' });
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const listApiKeys = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const keys = await ApiKey.find({ workspaceId, revokedAt: { $exists: false } }).sort({ createdAt: -1 });
-    res.json(keys);
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const createApiKey = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const token = `dlt_${randomToken(32)}`;
-    const key = await ApiKey.create({
-      workspaceId,
-      createdBy: req.user!.userId,
-      name: req.body.name,
-      keyHash: sha256(token),
-      keyPrefix: token.slice(0, 12),
-      scopes: req.body.scopes,
-      expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : undefined,
-    });
-
-    await logAuditEvent({
-      workspaceId: workspaceId as string,
-      actorId: req.user!.userId,
-      action: 'api_key.created',
-      resourceId: key.id,
-      metadata: { name: key.name, scopes: key.scopes, expiresAt: key.expiresAt },
-      req,
-    });
-
-    res.status(201).json({
-      id: key.id,
-      name: key.name,
-      keyPrefix: key.keyPrefix,
-      scopes: key.scopes,
-      expiresAt: key.expiresAt,
-      createdAt: key.createdAt,
-      token,
-    });
-  } catch (error: unknown) {
-    if (error instanceof ForbiddenError) {
-      return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
-    }
-    next(error);
-  }
-};
-
-export const revokeApiKey = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const workspaceId = req.workspaceId;
-    if (!workspaceId) return res.status(400).json({ error: 'No workspace context' });
-
-    ForbiddenError.from(req.ability!).throwUnlessCan('manage', 'Workspace');
-
-    const key = await ApiKey.findOneAndUpdate(
-      { _id: req.params.keyId, workspaceId, revokedAt: { $exists: false } },
-      { $set: { revokedAt: new Date() } },
-      { new: true }
-    );
-
-    if (!key) return res.status(404).json({ error: 'API key not found' });
-
-    await logAuditEvent({
-      workspaceId: workspaceId as string,
-      actorId: req.user!.userId,
-      action: 'api_key.revoked',
-      resourceId: key.id,
-      metadata: { name: key.name },
-      req,
-    });
-
-    res.json({ message: 'API key revoked' });
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: 'Forbidden', message: (error as ForbiddenError<any>).message });
@@ -621,16 +758,10 @@ export const getAuditLogs = async (req: Request, res: Response, next: NextFuncti
     if (action) query.action = { $regex: action, $options: 'i' };
     if (actor && mongoose.Types.ObjectId.isValid(actor)) query.actorId = actor;
 
-    const [logs, total] = await Promise.all([
-      AuditLog.find(query)
-      .sort({ createdAt: -1 })
-      .populate('actorId', 'name email')
-        .skip((page - 1) * limit)
-        .limit(limit),
-      AuditLog.countDocuments(query),
-    ]);
-
     if (exportFormat === 'csv') {
+      const logs = await AuditLog.find(query)
+        .sort({ createdAt: -1 })
+        .populate('actorId', 'name email');
       const rows = [
         ['createdAt', 'actor', 'email', 'action', 'resourceId', 'ipAddress', 'metadata'],
         ...logs.map(log => [
@@ -647,6 +778,15 @@ export const getAuditLogs = async (req: Request, res: Response, next: NextFuncti
       res.setHeader('Content-Disposition', 'attachment; filename="deltaora-audit-logs.csv"');
       return res.send(rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n'));
     }
+
+    const [logs, total] = await Promise.all([
+      AuditLog.find(query)
+      .sort({ createdAt: -1 })
+      .populate('actorId', 'name email')
+        .skip((page - 1) * limit)
+        .limit(limit),
+      AuditLog.countDocuments(query),
+    ]);
 
     res.json({
       data: logs,

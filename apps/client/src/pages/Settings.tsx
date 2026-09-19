@@ -4,7 +4,6 @@ import {
   Copy,
   Download,
   KeyRound,
-  MonitorCog,
   Moon,
   ShieldCheck,
   Sun,
@@ -32,6 +31,24 @@ interface Member {
   avatarUrl?: string | null;
   role: 'owner' | 'editor' | 'viewer';
   joinedAt: string;
+}
+
+interface WorkspaceSummary {
+  id: string;
+  name: string;
+  role: 'owner' | 'editor' | 'viewer';
+  ownerId: string;
+  memberCount: number;
+  createdAt: string;
+}
+
+interface PendingInvite {
+  id: string;
+  inviteeEmail?: string | null;
+  role: 'editor' | 'viewer';
+  expiresAt: string;
+  createdAt: string;
+  inviter?: { id: string; name: string; email: string } | null;
 }
 
 interface AuditLog {
@@ -74,36 +91,11 @@ interface CrawlerDefaults {
 interface WorkspaceSettings {
   id: string;
   name: string;
-  plan: string;
-  maxPages: number;
   pageCount: number;
   crawlerDefaults: CrawlerDefaults;
   notificationDefaults: {
     minimumImportance: 'low' | 'medium' | 'high' | 'critical';
   };
-}
-
-interface WebhookEndpoint {
-  _id: string;
-  name: string;
-  url: string;
-  events: string[];
-  isActive: boolean;
-  lastDeliveryAt?: string;
-  lastError?: string;
-  createdAt: string;
-}
-
-interface ApiKey {
-  _id?: string;
-  id?: string;
-  name: string;
-  keyPrefix: string;
-  scopes: string[];
-  lastUsedAt?: string;
-  expiresAt?: string;
-  createdAt: string;
-  token?: string;
 }
 
 interface CrawlerAuthSession {
@@ -163,8 +155,6 @@ const roleOptions = [
   { label: 'Viewer', value: 'viewer' },
 ];
 
-const webhookEvents = ['page.changed', 'page.failed', 'page.blocked', 'summary.created'];
-const apiScopes = ['pages:read', 'pages:write', 'notifications:read', 'webhooks:write'];
 const avatarUploadMaxBytes = 4 * 1024 * 1024;
 const avatarOutputSize = 512;
 const allowedAvatarTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -376,7 +366,7 @@ function Switch({
 }
 
 export function Settings() {
-  const { user, activeWorkspaceId, updateUser, logout } = useAuth();
+  const { user, activeWorkspaceId, setActiveWorkspaceId, updateUser, logout } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [profileName, setProfileName] = useState(user?.name || '');
@@ -384,8 +374,11 @@ export function Settings() {
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.avatarUrl || null);
   const [avatarError, setAvatarError] = useState('');
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
   const [inviteToken, setInviteToken] = useState('');
@@ -409,20 +402,7 @@ export function Settings() {
   const [auditTotalPages, setAuditTotalPages] = useState(1);
   const [auditAction, setAuditAction] = useState('');
   const [auditActor, setAuditActor] = useState('');
-  const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
-  const [webhookForm, setWebhookForm] = useState({
-    name: '',
-    url: '',
-    secret: '',
-    events: ['page.changed'],
-  });
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [apiKeyForm, setApiKeyForm] = useState({
-    name: '',
-    scopes: ['pages:read'],
-    expiresAt: '',
-  });
-  const [newApiToken, setNewApiToken] = useState('');
+  const [transferOwnerId, setTransferOwnerId] = useState('');
   const [crawlerSessions, setCrawlerSessions] = useState<CrawlerAuthSession[]>([]);
   const [passkeyName, setPasskeyName] = useState('');
   const [isPasskeyModalOpen, setIsPasskeyModalOpen] = useState(false);
@@ -447,6 +427,19 @@ export function Settings() {
     setMfaEnabled(Boolean(user?.mfaEnabled));
   }, [user]);
 
+  const fetchWorkspaces = useCallback(async () => {
+    try {
+      const res = await api.get('/workspaces');
+      const data = res.data || [];
+      setWorkspaces(data);
+      if (!activeWorkspaceId && data[0]?.id) {
+        setActiveWorkspaceId(data[0].id);
+      }
+    } catch {
+      setWorkspaces([]);
+    }
+  }, [activeWorkspaceId, setActiveWorkspaceId]);
+
   const fetchMembers = useCallback(async () => {
     if (!activeWorkspaceId) return;
     try {
@@ -454,6 +447,16 @@ export function Settings() {
       setMembers(res.data || []);
     } catch {
       setMembers([]);
+    }
+  }, [activeWorkspaceId]);
+
+  const fetchInvites = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    try {
+      const res = await api.get(`/workspaces/${activeWorkspaceId}/invites`);
+      setPendingInvites(res.data || []);
+    } catch {
+      setPendingInvites([]);
     }
   }, [activeWorkspaceId]);
 
@@ -524,26 +527,6 @@ export function Settings() {
     }
   }, [activeWorkspaceId, auditAction, auditActor]);
 
-  const fetchWebhooks = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      const res = await api.get(`/workspaces/${activeWorkspaceId}/webhooks`);
-      setWebhooks(res.data || []);
-    } catch {
-      setWebhooks([]);
-    }
-  }, [activeWorkspaceId]);
-
-  const fetchApiKeys = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      const res = await api.get(`/workspaces/${activeWorkspaceId}/api-keys`);
-      setApiKeys(res.data || []);
-    } catch {
-      setApiKeys([]);
-    }
-  }, [activeWorkspaceId]);
-
   const fetchCrawlerSessions = useCallback(async () => {
     try {
       const res = await api.get('/pages/auth-sessions');
@@ -554,20 +537,20 @@ export function Settings() {
   }, []);
 
   useEffect(() => {
+    fetchWorkspaces();
     fetchPreferences();
     fetchSessions();
     fetchPasskeys();
     fetchCrawlerSessions();
-  }, [fetchCrawlerSessions, fetchPasskeys, fetchPreferences, fetchSessions]);
+  }, [fetchCrawlerSessions, fetchPasskeys, fetchPreferences, fetchSessions, fetchWorkspaces]);
 
   useEffect(() => {
     if (!activeWorkspaceId) return;
     fetchMembers();
+    fetchInvites();
     fetchWorkspaceSettings();
     fetchAuditLogs(1);
-    fetchWebhooks();
-    fetchApiKeys();
-  }, [activeWorkspaceId, fetchApiKeys, fetchAuditLogs, fetchMembers, fetchWebhooks, fetchWorkspaceSettings]);
+  }, [activeWorkspaceId, fetchAuditLogs, fetchInvites, fetchMembers, fetchWorkspaceSettings]);
 
   const requestStepUp = useCallback((options: { requireMfa?: boolean; reason: string }) => {
     const mustUseMfa = options.requireMfa || mfaEnabled || user?.role === 'admin';
@@ -939,9 +922,89 @@ export function Settings() {
       setInviteToken(res.data.inviteToken);
       if (res.data.emailSent) setInviteEmail('');
       toast.success(res.data.emailSent ? 'Invite email sent' : 'Invite link generated');
+      fetchInvites();
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to generate invite'));
+      }
+    }
+  };
+
+  const createWorkspace = async () => {
+    const name = newWorkspaceName.trim();
+    if (!name) return;
+    try {
+      await requestStepUp({ reason: 'Create a workspace' });
+      const res = await api.post('/workspaces', { name });
+      setNewWorkspaceName('');
+      setWorkspaces(current => [...current, res.data]);
+      setActiveWorkspaceId(res.data.id);
+      toast.success('Workspace created');
+    } catch (error) {
+      if ((error as Error).message !== 'Step-up cancelled') {
+        toast.error(errorMessage(error, 'Failed to create workspace'));
+      }
+    }
+  };
+
+  const transferWorkspaceOwnership = async () => {
+    if (!activeWorkspaceId || !transferOwnerId) return;
+    try {
+      await requestStepUp({ reason: 'Transfer workspace ownership' });
+      await api.post(`/workspaces/${activeWorkspaceId}/transfer-ownership`, { userId: transferOwnerId });
+      toast.success('Ownership transferred');
+      setTransferOwnerId('');
+      fetchMembers();
+      fetchWorkspaces();
+    } catch (error) {
+      if ((error as Error).message !== 'Step-up cancelled') {
+        toast.error(errorMessage(error, 'Failed to transfer ownership'));
+      }
+    }
+  };
+
+  const deleteWorkspace = () => {
+    if (!activeWorkspaceId || !workspaceSettings) return;
+    askConfirm({
+      title: 'Delete workspace',
+      description: `${workspaceSettings.name} and its monitors, snapshots, summaries, invites, and crawler auth sessions will be deleted.`,
+      confirmation: workspaceSettings.name,
+      confirmationValue: '',
+      actionLabel: 'Delete workspace',
+      onConfirm: async () => {
+        await requestStepUp({ reason: 'Delete workspace' });
+        await api.delete(`/workspaces/${activeWorkspaceId}`);
+        const remaining = workspaces.filter(workspace => workspace.id !== activeWorkspaceId);
+        setWorkspaces(remaining);
+        setActiveWorkspaceId(remaining[0]?.id || null);
+        toast.success('Workspace deleted');
+      },
+    });
+  };
+
+  const revokeInvite = (invite: PendingInvite) => askConfirm({
+    title: 'Revoke invite',
+    description: invite.inviteeEmail ? `${invite.inviteeEmail} will no longer be able to join with this invite.` : 'This invite link will stop working immediately.',
+    actionLabel: 'Revoke invite',
+    onConfirm: async () => {
+      if (!activeWorkspaceId) return;
+      await requestStepUp({ reason: 'Revoke workspace invite' });
+      await api.delete(`/workspaces/${activeWorkspaceId}/invites/${invite.id}`);
+      setPendingInvites(current => current.filter(item => item.id !== invite.id));
+      toast.success('Invite revoked');
+    },
+  });
+
+  const resendInvite = async (invite: PendingInvite) => {
+    if (!activeWorkspaceId) return;
+    try {
+      await requestStepUp({ reason: 'Resend workspace invite' });
+      await api.post(`/workspaces/${activeWorkspaceId}/invites/${invite.id}/resend`);
+      toast.success('Invite resent');
+      fetchInvites();
+    } catch (error) {
+      if ((error as Error).message !== 'Step-up cancelled') {
+        toast.error(errorMessage(error, 'Failed to resend invite'));
       }
     }
   };
@@ -953,6 +1016,7 @@ export function Settings() {
       await api.patch(`/workspaces/${activeWorkspaceId}/members/${memberId}`, { role });
       toast.success('Role updated');
       fetchMembers();
+      fetchWorkspaces();
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
         toast.error(errorMessage(error, 'Failed to update role'));
@@ -970,81 +1034,7 @@ export function Settings() {
       await api.delete(`/workspaces/${activeWorkspaceId}/members/${member.id}`);
       toast.success(member.id === user?.id ? 'You left the workspace' : 'Member removed');
       fetchMembers();
-    },
-  });
-
-  const createWebhook = async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      await requestStepUp({ reason: 'Create webhook endpoint' });
-      const res = await api.post(`/workspaces/${activeWorkspaceId}/webhooks`, webhookForm);
-      setWebhooks([res.data, ...webhooks]);
-      setWebhookForm({ name: '', url: '', secret: '', events: ['page.changed'] });
-      toast.success('Webhook created');
-    } catch (error) {
-      if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to create webhook'));
-      }
-    }
-  };
-
-  const updateWebhookStatus = async (webhook: WebhookEndpoint, isActive: boolean) => {
-    if (!activeWorkspaceId) return;
-    try {
-      await requestStepUp({ reason: 'Update webhook status' });
-      const res = await api.patch(`/workspaces/${activeWorkspaceId}/webhooks/${webhook._id}`, { isActive });
-      setWebhooks(current => current.map(item => item._id === webhook._id ? res.data : item));
-      toast.success('Webhook updated');
-    } catch (error) {
-      if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to update webhook'));
-      }
-    }
-  };
-
-  const deleteWebhook = (webhook: WebhookEndpoint) => askConfirm({
-    title: 'Delete webhook',
-    description: `${webhook.name} will stop receiving Deltaora events.`,
-    actionLabel: 'Delete webhook',
-    onConfirm: async () => {
-      if (!activeWorkspaceId) return;
-      await requestStepUp({ reason: 'Delete webhook endpoint' });
-      await api.delete(`/workspaces/${activeWorkspaceId}/webhooks/${webhook._id}`);
-      setWebhooks(current => current.filter(item => item._id !== webhook._id));
-      toast.success('Webhook deleted');
-    },
-  });
-
-  const createApiKey = async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      await requestStepUp({ reason: 'Create API key' });
-      const res = await api.post(`/workspaces/${activeWorkspaceId}/api-keys`, {
-        name: apiKeyForm.name,
-        scopes: apiKeyForm.scopes,
-        expiresAt: apiKeyForm.expiresAt ? new Date(apiKeyForm.expiresAt).toISOString() : undefined,
-      });
-      setNewApiToken(res.data.token);
-      setApiKeys([{ ...res.data, _id: res.data.id }, ...apiKeys]);
-      setApiKeyForm({ name: '', scopes: ['pages:read'], expiresAt: '' });
-      toast.success('API key created');
-    } catch (error) {
-      if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to create API key'));
-      }
-    }
-  };
-
-  const revokeApiKey = (key: ApiKey) => askConfirm({
-    title: 'Revoke API key',
-    description: `${key.name} will stop working immediately.`,
-    actionLabel: 'Revoke key',
-    onConfirm: async () => {
-      if (!activeWorkspaceId) return;
-      await requestStepUp({ reason: 'Revoke API key' });
-      await api.delete(`/workspaces/${activeWorkspaceId}/api-keys/${key._id || key.id}`);
-      setApiKeys(current => current.filter(item => (item._id || item.id) !== (key._id || key.id)));
-      toast.success('API key revoked');
+      fetchWorkspaces();
     },
   });
 
@@ -1107,21 +1097,17 @@ export function Settings() {
     },
   });
 
-  const toggleString = (value: string, values: string[]) => (
-    values.includes(value) ? values.filter(item => item !== value) : [...values, value]
-  );
-
   return (
     <div className="mx-auto max-w-7xl space-y-6 pb-12">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-gray-950 dark:text-white">Settings</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Manage account security, workspace governance, crawler compliance, and operational integrations.
+            Manage account security, workspace governance, and crawler compliance.
           </p>
         </div>
         <div className="rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-gray-800 dark:text-gray-300">
-          {workspaceSettings ? `${workspaceSettings.pageCount} / ${workspaceSettings.maxPages} pages on ${workspaceSettings.plan}` : 'Workspace loading'}
+          {workspaceSettings ? `${workspaceSettings.pageCount} monitored pages` : 'Workspace loading'}
         </div>
       </div>
 
@@ -1233,9 +1219,47 @@ export function Settings() {
         </Card>
       </Section>
 
-      <Section title="Workspace" description="Set defaults that apply to newly monitored websites in this workspace.">
+      <Section title="Workspace" description="Manage workspace access, ownership, and defaults for newly monitored websites.">
         <Card>
-          <CardContent className="space-y-4 pt-6">
+          <CardContent className="space-y-6 pt-6">
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <Select
+                label="Active workspace"
+                value={activeWorkspaceId || ''}
+                onChange={event => setActiveWorkspaceId(event.target.value)}
+                options={workspaces.map(workspace => ({
+                  label: `${workspace.name} (${workspace.role})`,
+                  value: workspace.id,
+                }))}
+                disabled={workspaces.length === 0}
+              />
+              <Input
+                label="New workspace"
+                value={newWorkspaceName}
+                onChange={event => setNewWorkspaceName(event.target.value)}
+                placeholder="Marketing monitors"
+                maxLength={100}
+              />
+              <div className="flex items-end">
+                <Button onClick={createWorkspace} disabled={!newWorkspaceName.trim()}>Create</Button>
+              </div>
+            </div>
+            {workspaceSettings && (
+              <div className="grid gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:grid-cols-3">
+                <div>
+                  <div className="text-xs uppercase text-gray-500">Members</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{members.length}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-500">Monitored pages</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{workspaceSettings.pageCount}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-gray-500">Your role</div>
+                  <div className="mt-1 font-semibold text-gray-950 dark:text-white">{workspaces.find(workspace => workspace.id === activeWorkspaceId)?.role || 'member'}</div>
+                </div>
+              </div>
+            )}
             <Input
               label="Workspace name"
               value={workspaceSettings?.name || ''}
@@ -1318,37 +1342,31 @@ export function Settings() {
                 Save workspace policy
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      </Section>
-
-      <Section title="Billing" description="Track plan capacity and workspace usage.">
-        <Card>
-          <CardContent className="space-y-4 pt-6">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-md border border-gray-200 p-3 dark:border-gray-800">
-                <div className="text-xs uppercase text-gray-500">Plan</div>
-                <div className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">{workspaceSettings?.plan || 'Loading'}</div>
+            <div className="border-t border-gray-100 pt-5 dark:border-gray-800">
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <Select
+                  label="Primary owner"
+                  value={transferOwnerId}
+                  onChange={event => setTransferOwnerId(event.target.value)}
+                  options={[
+                    { label: 'Select a member', value: '' },
+                    ...members
+                      .filter(member => member.id !== user?.id)
+                      .map(member => ({ label: `${member.name} (${member.email})`, value: member.id })),
+                  ]}
+                  disabled={!isOwner || members.length <= 1}
+                />
+                <div className="flex items-end">
+                  <Button variant="outline" onClick={transferWorkspaceOwnership} disabled={!isOwner || !transferOwnerId}>
+                    Transfer ownership
+                  </Button>
+                </div>
               </div>
-              <div className="rounded-md border border-gray-200 p-3 dark:border-gray-800">
-                <div className="text-xs uppercase text-gray-500">Monitored pages</div>
-                <div className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">{workspaceSettings?.pageCount ?? 0}</div>
+              <div className="mt-4 flex justify-end">
+                <Button variant="destructive" onClick={deleteWorkspace} disabled={!isOwner || workspaces.length <= 1 || !workspaceSettings}>
+                  Delete workspace
+                </Button>
               </div>
-              <div className="rounded-md border border-gray-200 p-3 dark:border-gray-800">
-                <div className="text-xs uppercase text-gray-500">Page limit</div>
-                <div className="mt-1 text-lg font-semibold text-gray-950 dark:text-white">{workspaceSettings?.maxPages ?? 0}</div>
-              </div>
-            </div>
-            <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-800">
-              <div
-                className="h-2 rounded-full bg-blue-600"
-                style={{
-                  width: `${Math.min(100, Math.round(((workspaceSettings?.pageCount || 0) / Math.max(1, workspaceSettings?.maxPages || 1)) * 100))}%`,
-                }}
-              />
-            </div>
-            <div className="flex justify-end">
-              <Button variant="outline" disabled>Manage billing</Button>
             </div>
           </CardContent>
         </Card>
@@ -1409,6 +1427,26 @@ export function Settings() {
                 </div>
               </div>
             )}
+            <div className="border-t border-gray-100 pt-5 dark:border-gray-800">
+              <div className="mb-3 font-medium text-gray-950 dark:text-white">Pending invites</div>
+              <div className="space-y-2">
+                {pendingInvites.map(invite => (
+                  <div key={invite.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="font-medium text-gray-950 dark:text-white">{invite.inviteeEmail || 'Invite link'}</div>
+                      <div className="text-sm text-gray-500">{invite.role} / Expires {formatDate(invite.expiresAt)}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      {invite.inviteeEmail && (
+                        <Button variant="outline" disabled={!isOwner} onClick={() => resendInvite(invite)}>Resend</Button>
+                      )}
+                      <Button variant="outline" disabled={!isOwner} onClick={() => revokeInvite(invite)}>Revoke</Button>
+                    </div>
+                  </div>
+                ))}
+                {pendingInvites.length === 0 && <p className="text-sm text-gray-500">No pending invites.</p>}
+              </div>
+            </div>
           </CardContent>
         </Card>
       </Section>
@@ -1691,97 +1729,6 @@ export function Settings() {
         </Card>
       </Section>
 
-      <Section title="Integrations" description="Connect approved downstream systems without sharing passwords or crawler secrets.">
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="space-y-4 pt-6">
-              <div className="flex items-center gap-2 font-medium text-gray-950 dark:text-white">
-                <MonitorCog className="h-4 w-4" /> Webhooks
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Input label="Name" value={webhookForm.name} onChange={event => setWebhookForm({ ...webhookForm, name: event.target.value })} />
-                <Input label="URL" type="url" value={webhookForm.url} onChange={event => setWebhookForm({ ...webhookForm, url: event.target.value })} />
-                <Input label="Signing secret" type="password" value={webhookForm.secret} onChange={event => setWebhookForm({ ...webhookForm, secret: event.target.value })} />
-                <div>
-                  <div className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">Events</div>
-                  <div className="flex flex-wrap gap-2">
-                    {webhookEvents.map(event => (
-                      <label key={event} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
-                        <input
-                          type="checkbox"
-                          checked={webhookForm.events.includes(event)}
-                          onChange={() => setWebhookForm({ ...webhookForm, events: toggleString(event, webhookForm.events) })}
-                        />
-                        {event}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <Button onClick={createWebhook} disabled={!isOwner || !webhookForm.name || !webhookForm.url || webhookForm.events.length === 0}>Create webhook</Button>
-              <div className="space-y-2">
-                {webhooks.map(webhook => (
-                  <div key={webhook._id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-medium text-gray-950 dark:text-white">{webhook.name}</div>
-                      <div className="break-all text-sm text-gray-500">{webhook.url}</div>
-                      <div className="text-xs text-gray-500">Last delivery {formatDate(webhook.lastDeliveryAt)}{webhook.lastError ? ` / ${webhook.lastError}` : ''}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch checked={webhook.isActive} disabled={!isOwner} label={`Enable ${webhook.name}`} onChange={checked => updateWebhookStatus(webhook, checked)} />
-                      <Button variant="outline" size="icon" disabled={!isOwner} aria-label="Delete webhook" onClick={() => deleteWebhook(webhook)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {webhooks.length === 0 && <p className="text-sm text-gray-500">No webhooks configured.</p>}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-4 pt-6">
-              <div className="flex items-center gap-2 font-medium text-gray-950 dark:text-white">
-                <KeyRound className="h-4 w-4" /> API keys
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <Input label="Name" value={apiKeyForm.name} onChange={event => setApiKeyForm({ ...apiKeyForm, name: event.target.value })} />
-                <Input label="Expires at" type="date" value={apiKeyForm.expiresAt} onChange={event => setApiKeyForm({ ...apiKeyForm, expiresAt: event.target.value })} />
-                <div>
-                  <div className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">Scopes</div>
-                  <div className="flex flex-wrap gap-2">
-                    {apiScopes.map(scope => (
-                      <label key={scope} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
-                        <input
-                          type="checkbox"
-                          checked={apiKeyForm.scopes.includes(scope)}
-                          onChange={() => setApiKeyForm({ ...apiKeyForm, scopes: toggleString(scope, apiKeyForm.scopes) })}
-                        />
-                        {scope}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <Button onClick={createApiKey} disabled={!isOwner || !apiKeyForm.name || apiKeyForm.scopes.length === 0}>Create API key</Button>
-              <div className="space-y-2">
-                {apiKeys.map(key => (
-                  <div key={key._id || key.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-medium text-gray-950 dark:text-white">{key.name}</div>
-                      <div className="text-sm text-gray-500">{key.keyPrefix}... / {key.scopes.join(', ')}</div>
-                      <div className="text-xs text-gray-500">Last used {formatDate(key.lastUsedAt)} / Expires {formatDate(key.expiresAt)}</div>
-                    </div>
-                    <Button variant="outline" disabled={!isOwner} onClick={() => revokeApiKey(key)}>Revoke</Button>
-                  </div>
-                ))}
-                {apiKeys.length === 0 && <p className="text-sm text-gray-500">No API keys created.</p>}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </Section>
-
       <Section title="Crawler Auth" description="Review saved browser sessions used for websites where you have authorized access.">
         <Card>
           <CardContent className="space-y-3 pt-6">
@@ -1818,7 +1765,7 @@ export function Settings() {
         <Card>
           <CardContent className="space-y-4 pt-6">
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
-              <Input label="Action filter" value={auditAction} placeholder="member, webhook, auth" onChange={event => setAuditAction(event.target.value)} />
+              <Input label="Action filter" value={auditAction} placeholder="member, workspace, auth" onChange={event => setAuditAction(event.target.value)} />
               <Input label="Actor ID" value={auditActor} placeholder="Optional Mongo ID" onChange={event => setAuditActor(event.target.value)} />
               <div className="flex items-end">
                 <Button variant="outline" onClick={() => fetchAuditLogs(1)}>Apply</Button>
@@ -1944,26 +1891,6 @@ export function Settings() {
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setRenamePasskeyState(null)} disabled={isRenamingPasskey}>Cancel</Button>
             <Button onClick={renamePasskey} disabled={!renamePasskeyState?.name.trim()} isLoading={isRenamingPasskey}>Save</Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal isOpen={Boolean(newApiToken)} onClose={() => setNewApiToken('')} title="Copy API key">
-        <div className="space-y-4">
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            This token is shown once. Store it in a secrets manager before closing.
-          </div>
-          <div className="flex gap-2">
-            <Input readOnly value={newApiToken} aria-label="New API token" />
-            <Button variant="outline" size="icon" aria-label="Copy API key" onClick={() => {
-              navigator.clipboard.writeText(newApiToken);
-              toast.success('Copied');
-            }}>
-              <Copy className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={() => setNewApiToken('')}>Done</Button>
           </div>
         </div>
       </Modal>

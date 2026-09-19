@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { defineAbilityFor, AppAbility } from '../config/abilities';
 import { Workspace, WorkspaceRole } from '../models/Workspace';
 import { ForbiddenError } from '@casl/ability';
+import mongoose from 'mongoose';
 
 // Extend Express Request to carry CASL ability
 declare global {
@@ -35,10 +36,13 @@ export const resolveAbility = async (req: Request, res: Response, next: NextFunc
 
     // Prefer route-bound workspace ids, then the active workspace header.
     const headerWorkspaceId = req.headers['x-workspace-id'] as string;
-    const requestedWorkspaceId = req.params?.workspaceId;
+    const requestedWorkspaceId = req.params?.workspaceId || req.params?.id;
 
     if (requestedWorkspaceId || headerWorkspaceId) {
-      const workspace = await Workspace.findById(requestedWorkspaceId || headerWorkspaceId);
+      const candidateWorkspaceId = requestedWorkspaceId || headerWorkspaceId;
+      const workspace = mongoose.Types.ObjectId.isValid(candidateWorkspaceId)
+        ? await Workspace.findById(candidateWorkspaceId)
+        : null;
       if (workspace) {
         const member = workspace.members.find(m => m.userId.toString() === userId);
         if (member) {

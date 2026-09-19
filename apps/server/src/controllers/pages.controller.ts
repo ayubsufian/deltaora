@@ -5,7 +5,6 @@ import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
 import { AISummary } from '../models/AISummary';
 import { Notification } from '../models/Notification';
-import { Workspace } from '../models/Workspace';
 import { PageStatus } from '@deltaora/shared-types';
 import { ForbiddenError } from '@casl/ability';
 import { logAuditEvent } from '../services/audit.service';
@@ -75,18 +74,6 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
     // CASL check: can the user create MonitoredPages?
     ForbiddenError.from(req.ability!).throwUnlessCan('create', 'MonitoredPage');
 
-    // Entitlement check: enforce workspace plan limits
-    const workspace = await Workspace.findById(workspaceId);
-    if (workspace) {
-      const currentPageCount = await MonitoredPage.countDocuments({ workspaceId });
-      if (currentPageCount >= workspace.maxPages) {
-        return res.status(403).json({
-          error: 'Plan limit reached',
-          message: `Your ${workspace.plan} plan allows a maximum of ${workspace.maxPages} monitored pages. Please upgrade your plan.`,
-        });
-      }
-    }
-
     const existing = await MonitoredPage.findOne({ workspaceId, url });
     if (existing) {
       return res.status(409).json({ error: 'URL is already being monitored in this workspace' });
@@ -126,10 +113,8 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       const existingUrls = new Set(
         (await MonitoredPage.find({ workspaceId }).select('url')).map(existingPage => existingPage.url)
       );
-      let remainingSlots = Math.max(0, (workspace?.maxPages ?? Number.MAX_SAFE_INTEGER) - existingUrls.size);
 
       for (const discovered of discoveredUrls) {
-        if (remainingSlots <= 0) break;
         if (existingUrls.has(discovered.url)) continue;
 
         const discoveredUrl = new URL(discovered.url);
@@ -153,7 +138,6 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
         });
         discoveredPages.push(discoveredPage);
         existingUrls.add(discovered.url);
-        remainingSlots -= 1;
       }
     }
     

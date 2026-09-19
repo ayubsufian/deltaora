@@ -187,8 +187,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       name: `${name}'s Workspace`,
       ownerId: user._id,
       members: [{ userId: user._id, role: 'owner', joinedAt: new Date() }],
-      plan: 'free',
-      maxPages: 10,
     });
     await workspace.save();
 
@@ -659,8 +657,6 @@ export const googleLogin = async (req: Request, res: Response, next: NextFunctio
         name: `${user.name}'s Workspace`,
         ownerId: user._id,
         members: [{ userId: user._id, role: 'owner', joinedAt: new Date() }],
-        plan: 'free',
-        maxPages: 10,
       });
       await workspace.save();
       workspaceId = workspace.id;

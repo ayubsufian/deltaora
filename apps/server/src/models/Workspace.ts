@@ -12,8 +12,6 @@ export interface IWorkspaceDocument extends Document {
   name: string;
   ownerId: mongoose.Types.ObjectId;
   members: IWorkspaceMember[];
-  plan: 'free' | 'pro' | 'enterprise';
-  maxPages: number;
   crawlerDefaults: {
     respectRobots: boolean;
     blockedHandling: 'fail' | 'manual_review';
@@ -40,8 +38,6 @@ const WorkspaceSchema = new Schema<IWorkspaceDocument>(
     name: { type: String, required: true },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     members: { type: [WorkspaceMemberSchema], default: [] },
-    plan: { type: String, enum: ['free', 'pro', 'enterprise'], default: 'free' },
-    maxPages: { type: Number, default: 10 },
     crawlerDefaults: {
       respectRobots: { type: Boolean, default: true },
       blockedHandling: { type: String, enum: ['fail', 'manual_review'], default: 'manual_review' },

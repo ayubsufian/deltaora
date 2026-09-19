@@ -1,19 +1,19 @@
 import { Router } from 'express';
 import {
-  createApiKey,
-  createWebhook,
-  deleteWebhook,
+  createWorkspace,
+  deleteWorkspace,
   generateInvite,
   getAuditLogs,
   getMembers,
   getWorkspaceSettings,
   joinWorkspace,
-  listApiKeys,
-  listWebhooks,
+  listInvites,
+  listWorkspaces,
   removeMember,
-  revokeApiKey,
+  resendInvite,
+  revokeInvite,
+  transferWorkspaceOwnership,
   updateMemberRole,
-  updateWebhook,
   updateWorkspaceSettings,
 } from '../controllers/workspaces.controller';
 import { requireAuth, requireRecentStepUp, requireVerifiedEmail } from '../middleware/auth';
@@ -28,6 +28,8 @@ router.use(requireVerifiedEmail);
 
 // Join workspace doesn't need resolveAbility because they aren't in the workspace yet
 router.post('/join', validate(z.object({ inviteToken: z.string() })), joinWorkspace);
+router.get('/', listWorkspaces);
+router.post('/', requireRecentStepUp(), validate(z.object({ name: z.string().min(2).max(100) }).strict()), createWorkspace);
 
 const crawlerDefaultsSchema = z.object({
   respectRobots: z.boolean(),
@@ -39,20 +41,6 @@ const crawlerDefaultsSchema = z.object({
 
 const notificationDefaultsSchema = z.object({
   minimumImportance: z.enum(['low', 'medium', 'high', 'critical']),
-}).strict();
-
-const webhookSchema = z.object({
-  name: z.string().min(1).max(100),
-  url: z.string().url(),
-  events: z.array(z.enum(['page.changed', 'page.failed', 'page.blocked', 'summary.created'])).min(1).max(10),
-  secret: z.string().max(500).optional(),
-  isActive: z.boolean().optional(),
-}).strict();
-
-const apiKeySchema = z.object({
-  name: z.string().min(1).max(100),
-  scopes: z.array(z.enum(['pages:read', 'pages:write', 'notifications:read', 'webhooks:write'])).min(1).max(10),
-  expiresAt: z.string().datetime().optional(),
 }).strict();
 
 router.get('/:id/settings', resolveAbility, getWorkspaceSettings);
@@ -70,13 +58,14 @@ router.patch(
 
 router.get('/:id/members', resolveAbility, getMembers);
 router.get('/:id/audit-logs', resolveAbility, getAuditLogs);
-router.get('/:id/webhooks', resolveAbility, listWebhooks);
-router.post('/:id/webhooks', resolveAbility, requireRecentStepUp(), validate(webhookSchema), createWebhook);
-router.patch('/:id/webhooks/:webhookId', resolveAbility, requireRecentStepUp(), validate(webhookSchema.partial()), updateWebhook);
-router.delete('/:id/webhooks/:webhookId', resolveAbility, requireRecentStepUp(), deleteWebhook);
-router.get('/:id/api-keys', resolveAbility, listApiKeys);
-router.post('/:id/api-keys', resolveAbility, requireRecentStepUp(), validate(apiKeySchema), createApiKey);
-router.delete('/:id/api-keys/:keyId', resolveAbility, requireRecentStepUp(), revokeApiKey);
+router.post(
+  '/:id/transfer-ownership',
+  resolveAbility,
+  requireRecentStepUp(),
+  validate(z.object({ userId: z.string().regex(/^[0-9a-fA-F]{24}$/) }).strict()),
+  transferWorkspaceOwnership
+);
+router.delete('/:id', resolveAbility, requireRecentStepUp(), deleteWorkspace);
 
 router.post(
   '/:id/invites',
@@ -85,12 +74,15 @@ router.post(
   validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().email().optional() })),
   generateInvite
 );
+router.get('/:id/invites', resolveAbility, listInvites);
+router.post('/:id/invites/:inviteId/resend', resolveAbility, requireRecentStepUp(), resendInvite);
+router.delete('/:id/invites/:inviteId', resolveAbility, requireRecentStepUp(), revokeInvite);
 
 router.patch(
   '/:id/members/:userId',
   resolveAbility,
   requireRecentStepUp(),
-  validate(z.object({ role: z.enum(['owner', 'editor', 'viewer']) })),
+  validate(z.object({ role: z.enum(['owner', 'editor', 'viewer']) }).strict()),
   updateMemberRole
 );
 
