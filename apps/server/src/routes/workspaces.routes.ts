@@ -71,7 +71,7 @@ router.post(
   '/:id/invites',
   resolveAbility,
   requireRecentStepUp(),
-  validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().email().optional() })),
+  validate(z.object({ role: z.enum(['editor', 'viewer']), email: z.string().trim().toLowerCase().email().optional() })),
   generateInvite
 );
 router.get('/:id/invites', resolveAbility, listInvites);

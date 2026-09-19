@@ -279,7 +279,8 @@ export const updateWorkspaceSettings = async (req: Request, res: Response, next:
 export const generateInvite = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workspaceId = req.workspaceId;
-    const { role, email } = req.body; // 'editor' | 'viewer', optional email
+    const { role } = req.body; // 'editor' | 'viewer'
+    const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : undefined;
 
     if (!workspaceId) {
       return res.status(400).json({ error: 'No workspace context' });
@@ -291,6 +292,40 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
     const validRoles = ['editor', 'viewer'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ error: 'Invalid role for invitation' });
+    }
+
+    const workspace = await Workspace.findById(workspaceId);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    if (email) {
+      const invitee = await User.findOne({ email }).select('_id email name');
+      if (invitee) {
+        const existingMember = workspace.members.find(member => member.userId.toString() === invitee.id);
+
+        if (existingMember) {
+          await logAuditEvent({
+            workspaceId: workspaceId as string,
+            actorId: req.user!.userId,
+            action: 'member.invite_skipped_existing_member',
+            resourceId: invitee.id,
+            metadata: { email, role: existingMember.role },
+            req,
+          });
+
+          return res.status(409).json({
+            code: 'WORKSPACE_MEMBER_EXISTS',
+            error: `${email} is already a member of this workspace`,
+            member: {
+              id: invitee.id,
+              email: invitee.email,
+              name: invitee.name,
+              role: existingMember.role,
+            },
+          });
+        }
+      }
     }
 
     const inviteToken = randomToken(32);
@@ -308,14 +343,13 @@ export const generateInvite = async (req: Request, res: Response, next: NextFunc
     // 2026 Standard: If an email is provided, automatically send the invite
     if (email) {
       const inviter = await User.findById(req.user!.userId);
-      const workspace = await Workspace.findById(workspaceId);
 
       await sendEmail({
         to: email,
-        subject: `You've been invited to ${workspace?.name || 'a workspace'} on Deltaora`,
+        subject: `You've been invited to ${workspace.name || 'a workspace'} on Deltaora`,
         htmlContent: workspaceInviteEmail(
           inviter?.name || 'A team member',
-          workspace?.name || 'a workspace',
+          workspace.name || 'a workspace',
           joinUrl,
           env.CLIENT_URL
         ),

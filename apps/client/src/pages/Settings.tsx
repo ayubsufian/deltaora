@@ -196,6 +196,11 @@ function errorMessage(error: unknown, fallback: string) {
   return err.response?.data?.details?.[0] || err.response?.data?.error || fallback;
 }
 
+function errorCode(error: unknown) {
+  const err = error as { response?: { data?: { code?: string } } };
+  return err.response?.data?.code;
+}
+
 function canvasToDataUrl(canvas: HTMLCanvasElement) {
   const webp = canvas.toDataURL('image/webp', 0.86);
   if (webp.startsWith('data:image/webp')) return webp;
@@ -400,6 +405,7 @@ export function Settings() {
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteEmailError, setInviteEmailError] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
   const [inviteToken, setInviteToken] = useState('');
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(defaultNotificationPreferences);
@@ -602,6 +608,7 @@ export function Settings() {
     setWorkspaceSettingsError('');
     setTransferOwnerId('');
     setInviteToken('');
+    setInviteEmailError('');
 
     if (!activeWorkspaceId) {
       setIsLoadingWorkspaceSettings(false);
@@ -988,6 +995,8 @@ export function Settings() {
   const generateInvite = async () => {
     if (!activeWorkspaceId) return;
     setWorkspaceAction('invite');
+    setInviteEmailError('');
+    setInviteToken('');
     try {
       await requestStepUp({ reason: 'Invite a workspace member' });
       const payload = { role: inviteRole, ...(inviteEmail.trim() ? { email: inviteEmail.trim() } : {}) };
@@ -998,7 +1007,12 @@ export function Settings() {
       fetchInvites();
     } catch (error) {
       if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to generate invite'));
+        const message = errorMessage(error, 'Failed to generate invite');
+        if (errorCode(error) === 'WORKSPACE_MEMBER_EXISTS') {
+          setInviteEmailError(message);
+        } else {
+          toast.error(message);
+        }
       }
     } finally {
       setWorkspaceAction(null);
@@ -1630,11 +1644,27 @@ export function Settings() {
               ))}
             </div>
             <div className="grid gap-3 border-t border-gray-100 pt-5 dark:border-gray-800 sm:grid-cols-[1fr_160px_auto]">
-              <Input label="Invite email" type="email" placeholder="teammate@example.com" value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} />
+              <Input
+                label="Invite email"
+                type="email"
+                autoComplete="email"
+                placeholder="teammate@example.com"
+                value={inviteEmail}
+                error={inviteEmailError}
+                onChange={event => {
+                  setInviteEmail(event.target.value);
+                  setInviteEmailError('');
+                }}
+              />
               <Select label="Role" value={inviteRole} onChange={event => setInviteRole(event.target.value as 'editor' | 'viewer')} options={roleOptions.filter(option => option.value !== 'owner')} />
               <div className="flex items-end">
                 <Button onClick={generateInvite} isLoading={workspaceAction === 'invite'} disabled={!isOwner}>Invite</Button>
               </div>
+            </div>
+            <div role="status" aria-live="polite" className="text-sm text-gray-500 dark:text-gray-400">
+              {inviteEmailError
+                ? 'No invitation was sent because this person already has access.'
+                : 'Email invites are checked against current workspace members before delivery.'}
             </div>
             {inviteToken && (
               <div className="rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40">
