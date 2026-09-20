@@ -10,6 +10,9 @@ import toast from 'react-hot-toast';
 export function DashboardLayout() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const [isSending, setIsSending] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('sidebarCollapsed') === 'true';
+  });
 
   if (isLoading) {
     return (
@@ -35,10 +38,18 @@ export function DashboardLayout() {
     }
   };
 
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(current => {
+      const next = !current;
+      localStorage.setItem('sidebarCollapsed', String(next));
+      return next;
+    });
+  };
+
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 flex overflow-hidden">
-      <Sidebar />
-      <div className="flex flex-1 flex-col lg:pl-64 h-full">
+      <Sidebar isCollapsed={isSidebarCollapsed} onToggleCollapsed={toggleSidebar} />
+      <div className={`flex h-full flex-1 flex-col transition-all duration-200 ${isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <Header />
         <main className="flex-1 overflow-y-auto">
           {user.isEmailVerified === false && (
