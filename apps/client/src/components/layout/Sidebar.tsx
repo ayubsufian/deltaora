@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Globe, LayoutDashboard, LogOut, Plus, Settings } from 'lucide-react';
+import { BarChart3, Globe, LayoutDashboard, LogOut, Pencil, Plus, Settings } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { Avatar } from '../ui/Avatar';
@@ -51,6 +51,10 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const [pickerStyle, setPickerStyle] = useState<React.CSSProperties>({});
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [isSavingRename, setIsSavingRename] = useState(false);
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isAllPagesActive = location.pathname === '/pages' && searchParams.get('scope') === 'all';
@@ -115,6 +119,44 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
     setIsCreateModalOpen(false);
     setIsEmojiPickerOpen(false);
     setCreateError('');
+  };
+
+  const openRenameModal = (workspace: WorkspaceSummary) => {
+    setRenamingWorkspace(workspace);
+    setRenameValue(workspace.name);
+    setRenameError('');
+  };
+
+  const closeRenameModal = () => {
+    if (isSavingRename) return;
+    setRenamingWorkspace(null);
+    setRenameError('');
+  };
+
+  const saveRename = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    if (!renamingWorkspace) return;
+    const name = renameValue.trim();
+    if (name.length < 2) {
+      setRenameError('Name must be at least 2 characters.');
+      return;
+    }
+    if (name === renamingWorkspace.name) {
+      closeRenameModal();
+      return;
+    }
+    setIsSavingRename(true);
+    setRenameError('');
+    try {
+      await api.patch(`/workspaces/${renamingWorkspace.id}/settings`, { name });
+      await fetchWorkspaces();
+      toast.success('Workspace renamed');
+      setRenamingWorkspace(null);
+    } catch (error: any) {
+      setRenameError(error.response?.data?.error || 'Failed to rename workspace.');
+    } finally {
+      setIsSavingRename(false);
+    }
   };
 
   const openEmojiPicker = () => {
@@ -249,21 +291,34 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
               location.pathname.startsWith('/pages') &&
               searchParams.get('scope') !== 'all' &&
               activeWorkspaceId === workspace.id;
+            const canRename = workspace.role === 'owner' || workspace.role === 'editor';
 
             return (
-              <Link
-                key={workspace.id}
-                to={`/pages?workspace=${workspace.id}`}
-                onClick={() => handleWorkspaceClick(workspace.id)}
-                aria-current={isActive ? 'page' : undefined}
-                className={`${navBaseClass(isCollapsed)} ${navStateClass(isActive)}`}
-                title={workspace.name}
-              >
-                <span className={`${isCollapsed ? '' : 'mr-3'} shrink-0 text-lg leading-none`} aria-hidden="true">
-                  {workspace.emoji || '📗'}
-                </span>
-                <span className={isCollapsed ? 'sr-only' : 'truncate'}>{workspace.name}</span>
-              </Link>
+              <div key={workspace.id} className="group relative flex items-center">
+                <Link
+                  to={`/pages?workspace=${workspace.id}`}
+                  onClick={() => handleWorkspaceClick(workspace.id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`${navBaseClass(isCollapsed)} ${navStateClass(isActive)} flex-1 ${!isCollapsed && canRename ? 'pr-8' : ''}`}
+                  title={workspace.name}
+                >
+                  <span className={`${isCollapsed ? '' : 'mr-3'} shrink-0 text-lg leading-none`} aria-hidden="true">
+                    {workspace.emoji || '📗'}
+                  </span>
+                  <span className={isCollapsed ? 'sr-only' : 'truncate'}>{workspace.name}</span>
+                </Link>
+                {!isCollapsed && canRename && (
+                  <button
+                    type="button"
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); openRenameModal(workspace); }}
+                    className="absolute right-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    aria-label={`Rename ${workspace.name}`}
+                    title="Rename workspace"
+                  >
+                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             );
           })}
 
@@ -448,6 +503,72 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
         </>,
         document.body
       )}
+      {renamingWorkspace && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md"
+          role="presentation"
+          onMouseDown={closeRenameModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-workspace-title"
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
+            onMouseDown={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+              <span className="text-2xl" aria-hidden="true">{renamingWorkspace.emoji || '📗'}</span>
+              <p id="rename-workspace-title" className="text-sm font-semibold text-gray-950 dark:text-white">
+                Rename workspace
+              </p>
+            </div>
+
+            <form onSubmit={saveRename}>
+              <div className="px-5 py-4">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Workspace name
+                  </span>
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={e => { setRenameValue(e.target.value); setRenameError(''); }}
+                    onFocus={e => e.target.select()}
+                    onKeyDown={e => { if (e.key === 'Escape') closeRenameModal(); }}
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                    maxLength={100}
+                  />
+                </label>
+                {renameError && (
+                  <p role="alert" className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">
+                    {renameError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={closeRenameModal}
+                  disabled={isSavingRename}
+                  className="h-9 rounded-lg px-4 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:focus-visible:ring-offset-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingRename || renameValue.trim().length < 2}
+                  className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
+                >
+                  {isSavingRename ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </aside>
   );
 }
