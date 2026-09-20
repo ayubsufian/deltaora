@@ -289,16 +289,16 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
             aria-modal="true"
             aria-labelledby="create-workspace-title"
             aria-describedby="create-workspace-description"
-            className="w-full max-w-[930px] overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
+            className="w-full max-w-[744px] overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
             onMouseDown={event => event.stopPropagation()}
           >
-            <div className="flex items-center gap-6 bg-gray-50 px-8 py-6 dark:bg-gray-900">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-5xl text-blue-600 dark:bg-blue-950 dark:text-blue-300">
-                <Plus className="h-10 w-10" aria-hidden="true" />
+            <div className="flex items-center gap-5 bg-gray-50 px-7 py-5 dark:bg-gray-900">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-4xl text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+                <Plus className="h-8 w-8" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <p id="create-workspace-title" className="text-xl font-medium text-gray-950 dark:text-white">Create a New Workspace</p>
-                <p className="mt-1 truncate text-2xl font-semibold text-gray-950 dark:text-white">
+                <p id="create-workspace-title" className="text-base font-medium text-gray-950 dark:text-white">Create a New Workspace</p>
+                <p className="mt-1 truncate text-xl font-semibold text-gray-950 dark:text-white">
                   <span aria-hidden="true" className="mr-2">{newWorkspaceEmoji.trim() || '📗'}</span>
                   {newWorkspaceName.trim() || 'Workspace'}
                 </p>
@@ -306,24 +306,24 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
             </div>
 
             <form onSubmit={createWorkspace}>
-              <div className="border-t border-gray-200 px-8 py-8 dark:border-gray-800">
-                <p id="create-workspace-description" className="max-w-3xl text-2xl leading-9 text-gray-500 dark:text-gray-400">
+              <div className="border-t border-gray-200 px-7 py-7 dark:border-gray-800">
+                <p id="create-workspace-description" className="max-w-2xl text-lg leading-8 text-gray-500 dark:text-gray-400">
                   Create a new workspace for your organization. All current users will be added to the new workspace.
                 </p>
 
-                <div className="mt-8 grid gap-6 sm:grid-cols-[84px_1fr]">
+                <div className="mt-7 grid gap-5 sm:grid-cols-[68px_1fr]">
                   <label className="block">
-                    <span className="mb-3 block text-xl text-gray-500 dark:text-gray-400">Emoji</span>
+                    <span className="mb-3 block text-base text-gray-500 dark:text-gray-400">Emoji</span>
                     <input
                       value={newWorkspaceEmoji}
                       onChange={event => setNewWorkspaceEmoji(event.target.value.slice(0, 8))}
-                      className="h-[62px] w-[84px] rounded-md border border-blue-300 bg-white px-3 text-center text-3xl outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-blue-800 dark:bg-gray-950 dark:ring-offset-gray-900"
+                      className="h-[50px] w-[68px] rounded-md border border-blue-300 bg-white px-2 text-center text-2xl outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-blue-800 dark:bg-gray-950 dark:ring-offset-gray-900"
                       aria-label="Workspace emoji"
                       maxLength={8}
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-3 block text-xl text-gray-500 dark:text-gray-400">Workspace Name</span>
+                    <span className="mb-3 block text-base text-gray-500 dark:text-gray-400">Workspace Name</span>
                     <input
                       autoFocus
                       value={newWorkspaceName}
@@ -331,7 +331,7 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                         setNewWorkspaceName(event.target.value);
                         setCreateError('');
                       }}
-                      className="h-[62px] w-full rounded-md border border-gray-200 bg-white px-5 text-2xl text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                      className="h-[50px] w-full rounded-md border border-gray-200 bg-white px-4 text-xl text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
                       maxLength={100}
                     />
                   </label>
@@ -342,19 +342,19 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                 )}
               </div>
 
-              <div className="flex items-center justify-between border-t border-gray-100 px-8 py-8 dark:border-gray-800">
+              <div className="flex items-center justify-between border-t border-gray-100 px-7 py-7 dark:border-gray-800">
                 <button
                   type="button"
                   onClick={closeCreateModal}
                   disabled={isCreatingWorkspace}
-                  className="h-[74px] rounded-lg bg-blue-100 px-9 text-2xl font-medium text-blue-700 transition-colors hover:bg-blue-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 dark:focus-visible:ring-offset-gray-900"
+                  className="h-[58px] rounded-lg bg-blue-100 px-7 text-lg font-medium text-blue-700 transition-colors hover:bg-blue-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 dark:focus-visible:ring-offset-gray-900"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isCreatingWorkspace || newWorkspaceName.trim().length < 2}
-                  className="h-[74px] rounded-lg bg-blue-600 px-10 text-2xl font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
+                  className="h-[58px] rounded-lg bg-blue-600 px-8 text-lg font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
                 >
                   {isCreatingWorkspace ? 'Creating...' : 'Create Workspace'}
                 </button>
