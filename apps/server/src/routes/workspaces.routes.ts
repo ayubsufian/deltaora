@@ -50,7 +50,6 @@ router.get('/:id/settings', resolveAbility, getWorkspaceSettings);
 router.patch(
   '/:id/settings',
   resolveAbility,
-  requireRecentStepUp(),
   validate(z.object({
     name: z.string().trim().min(2).max(100).optional(),
     emoji: z.string().trim().min(1).max(8).optional(),
