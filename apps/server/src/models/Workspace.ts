@@ -10,6 +10,7 @@ export interface IWorkspaceMember {
 
 export interface IWorkspaceDocument extends Document {
   name: string;
+  emoji?: string;
   ownerId: mongoose.Types.ObjectId;
   members: IWorkspaceMember[];
   crawlerDefaults: {
@@ -36,6 +37,7 @@ const WorkspaceMemberSchema = new Schema<IWorkspaceMember>(
 const WorkspaceSchema = new Schema<IWorkspaceDocument>(
   {
     name: { type: String, required: true },
+    emoji: { type: String, default: '📗', trim: true, maxlength: 8 },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     members: { type: [WorkspaceMemberSchema], default: [] },
     crawlerDefaults: {

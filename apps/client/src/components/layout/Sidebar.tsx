@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Building2, Globe, LayoutDashboard, LogOut, Plus, Settings } from 'lucide-react';
+import { BarChart3, Globe, LayoutDashboard, LogOut, Plus, Settings } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { Avatar } from '../ui/Avatar';
@@ -9,6 +9,7 @@ import api from '../../lib/axios';
 interface WorkspaceSummary {
   id: string;
   name: string;
+  emoji?: string;
   role: 'owner' | 'editor' | 'viewer';
   memberCount: number;
 }
@@ -39,14 +40,25 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspaceEmoji, setNewWorkspaceEmoji] = useState('📗');
+  const [createError, setCreateError] = useState('');
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isAllPagesActive = location.pathname === '/pages' && searchParams.get('scope') === 'all';
 
+  const fetchWorkspaces = async () => {
+    const res = await api.get('/workspaces');
+    setWorkspaces(res.data || []);
+    return (res.data || []) as WorkspaceSummary[];
+  };
+
   useEffect(() => {
     let isMounted = true;
 
-    const fetchWorkspaces = async () => {
+    const loadWorkspaces = async () => {
       try {
         const res = await api.get('/workspaces');
         if (isMounted) setWorkspaces(res.data || []);
@@ -55,12 +67,23 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
       }
     };
 
-    fetchWorkspaces();
+    loadWorkspaces();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!isCreateModalOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeCreateModal();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isCreateModalOpen, isCreatingWorkspace]);
 
   const handleLogout = async () => {
     await logout();
@@ -70,6 +93,47 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
 
   const handleWorkspaceClick = (workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
+  };
+
+  const openCreateModal = () => {
+    const nextNumber = workspaces.length + 1;
+    setNewWorkspaceName(`Workspace ${nextNumber}`);
+    setNewWorkspaceEmoji('📗');
+    setCreateError('');
+    setIsCreateModalOpen(true);
+  };
+
+  const closeCreateModal = () => {
+    if (isCreatingWorkspace) return;
+    setIsCreateModalOpen(false);
+    setCreateError('');
+  };
+
+  const createWorkspace = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const name = newWorkspaceName.trim();
+    const emoji = newWorkspaceEmoji.trim() || '📗';
+
+    if (name.length < 2) {
+      setCreateError('Use at least 2 characters for the workspace name.');
+      return;
+    }
+
+    setIsCreatingWorkspace(true);
+    setCreateError('');
+
+    try {
+      const res = await api.post('/workspaces', { name, emoji });
+      await fetchWorkspaces();
+      setActiveWorkspaceId(res.data.id);
+      setIsCreateModalOpen(false);
+      toast.success('Workspace created');
+      navigate(`/pages?workspace=${res.data.id}`);
+    } catch (error: any) {
+      setCreateError(error.response?.data?.error || 'Failed to create workspace.');
+    } finally {
+      setIsCreatingWorkspace(false);
+    }
   };
 
   return (
@@ -150,19 +214,23 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                 className={`${navBaseClass(isCollapsed)} ${navStateClass(isActive)}`}
                 title={workspace.name}
               >
-                <Building2
-                  className={`${isCollapsed ? '' : 'mr-3'} h-5 w-5 shrink-0 ${isActive ? 'text-blue-700 dark:text-blue-300' : 'text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300'}`}
-                  aria-hidden="true"
-                />
+                <span className={`${isCollapsed ? '' : 'mr-3'} shrink-0 text-lg leading-none`} aria-hidden="true">
+                  {workspace.emoji || '📗'}
+                </span>
                 <span className={isCollapsed ? 'sr-only' : 'truncate'}>{workspace.name}</span>
               </Link>
             );
           })}
 
-          <Link to="/settings#new-workspace" className={`${navBaseClass(isCollapsed)} ${navStateClass(false)}`} title="New Workspace">
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className={`${navBaseClass(isCollapsed)} ${navStateClass(false)}`}
+            title="New Workspace"
+          >
             <Plus className={`${isCollapsed ? '' : 'mr-3'} h-5 w-5 shrink-0 text-gray-400 group-hover:text-gray-500 dark:group-hover:text-gray-300`} aria-hidden="true" />
             <span className={isCollapsed ? 'sr-only' : 'truncate'}>New Workspace</span>
-          </Link>
+          </button>
         </div>
 
         <div className={`shrink-0 border-t border-gray-100 py-4 dark:border-gray-800 ${isCollapsed ? 'px-3' : 'px-4'}`}>
@@ -213,6 +281,88 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
           )}
         </div>
       </nav>
+
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-md" role="presentation" onMouseDown={closeCreateModal}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-workspace-title"
+            aria-describedby="create-workspace-description"
+            className="w-full max-w-[930px] overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-6 bg-gray-50 px-8 py-6 dark:bg-gray-900">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-5xl text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+                <Plus className="h-10 w-10" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <p id="create-workspace-title" className="text-xl font-medium text-gray-950 dark:text-white">Create a New Workspace</p>
+                <p className="mt-1 truncate text-2xl font-semibold text-gray-950 dark:text-white">
+                  <span aria-hidden="true" className="mr-2">{newWorkspaceEmoji.trim() || '📗'}</span>
+                  {newWorkspaceName.trim() || 'Workspace'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={createWorkspace}>
+              <div className="border-t border-gray-200 px-8 py-8 dark:border-gray-800">
+                <p id="create-workspace-description" className="max-w-3xl text-2xl leading-9 text-gray-500 dark:text-gray-400">
+                  Create a new workspace for your organization. All current users will be added to the new workspace.
+                </p>
+
+                <div className="mt-8 grid gap-6 sm:grid-cols-[84px_1fr]">
+                  <label className="block">
+                    <span className="mb-3 block text-xl text-gray-500 dark:text-gray-400">Emoji</span>
+                    <input
+                      value={newWorkspaceEmoji}
+                      onChange={event => setNewWorkspaceEmoji(event.target.value.slice(0, 8))}
+                      className="h-[62px] w-[84px] rounded-md border border-blue-300 bg-white px-3 text-center text-3xl outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-blue-800 dark:bg-gray-950 dark:ring-offset-gray-900"
+                      aria-label="Workspace emoji"
+                      maxLength={8}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-3 block text-xl text-gray-500 dark:text-gray-400">Workspace Name</span>
+                    <input
+                      autoFocus
+                      value={newWorkspaceName}
+                      onChange={event => {
+                        setNewWorkspaceName(event.target.value);
+                        setCreateError('');
+                      }}
+                      className="h-[62px] w-full rounded-md border border-gray-200 bg-white px-5 text-2xl text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                      maxLength={100}
+                    />
+                  </label>
+                </div>
+
+                {createError && (
+                  <p role="alert" className="mt-4 text-sm font-medium text-red-600 dark:text-red-400">{createError}</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between border-t border-gray-100 px-8 py-8 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={closeCreateModal}
+                  disabled={isCreatingWorkspace}
+                  className="h-[74px] rounded-lg bg-blue-100 px-9 text-2xl font-medium text-blue-700 transition-colors hover:bg-blue-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:opacity-60 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 dark:focus-visible:ring-offset-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingWorkspace || newWorkspaceName.trim().length < 2}
+                  className="h-[74px] rounded-lg bg-blue-600 px-10 text-2xl font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
+                >
+                  {isCreatingWorkspace ? 'Creating...' : 'Create Workspace'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

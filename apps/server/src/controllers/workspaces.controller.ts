@@ -19,6 +19,7 @@ import { randomToken, sha256 } from '../services/security.service';
 const workspaceSummary = (workspace: any, userId: string) => ({
   id: workspace.id,
   name: workspace.name,
+  emoji: workspace.emoji || '📗',
   role: workspace.members.find((member: any) => member.userId.toString() === userId)?.role,
   ownerId: workspace.ownerId.toString(),
   memberCount: workspace.members.length,
@@ -37,17 +38,32 @@ export const listWorkspaces = async (req: Request, res: Response, next: NextFunc
 export const createWorkspace = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const name = req.body.name.trim();
+    const emoji = typeof req.body.emoji === 'string' && req.body.emoji.trim() ? req.body.emoji.trim() : '📗';
+    const activeWorkspaceId = req.headers['x-workspace-id'] as string | undefined;
+    const sourceWorkspace = activeWorkspaceId && mongoose.Types.ObjectId.isValid(activeWorkspaceId)
+      ? await Workspace.findById(activeWorkspaceId)
+      : null;
+    const canCopyMembers = sourceWorkspace?.members.some(member => member.userId.toString() === req.user!.userId);
+    const members = canCopyMembers
+      ? sourceWorkspace!.members.map(member => ({
+          userId: member.userId,
+          role: member.userId.toString() === req.user!.userId ? 'owner' : member.role,
+          joinedAt: new Date(),
+        }))
+      : [{ userId: req.user!.userId, role: 'owner', joinedAt: new Date() }];
+
     const workspace = await Workspace.create({
       name,
+      emoji,
       ownerId: req.user!.userId,
-      members: [{ userId: req.user!.userId, role: 'owner', joinedAt: new Date() }],
+      members,
     });
 
     await logAuditEvent({
       workspaceId: workspace.id,
       actorId: req.user!.userId,
       action: 'workspace.created',
-      metadata: { name },
+      metadata: { name, emoji, copiedMemberCount: members.length },
       req,
     });
 
@@ -211,6 +227,7 @@ export const getWorkspaceSettings = async (req: Request, res: Response, next: Ne
     res.json({
       id: workspace.id,
       name: workspace.name,
+      emoji: workspace.emoji || '📗',
       pageCount,
       crawlerDefaults: workspace.crawlerDefaults,
       notificationDefaults: workspace.notificationDefaults,
@@ -236,6 +253,9 @@ export const updateWorkspaceSettings = async (req: Request, res: Response, next:
     const update: any = {};
     if (typeof req.body.name === 'string') {
       update.name = req.body.name.trim();
+    }
+    if (typeof req.body.emoji === 'string') {
+      update.emoji = req.body.emoji.trim() || '📗';
     }
     if (req.body.crawlerDefaults) {
       update.crawlerDefaults = req.body.crawlerDefaults;
@@ -265,6 +285,7 @@ export const updateWorkspaceSettings = async (req: Request, res: Response, next:
     res.json({
       id: workspace.id,
       name: workspace.name,
+      emoji: workspace.emoji || '📗',
       crawlerDefaults: workspace.crawlerDefaults,
       notificationDefaults: workspace.notificationDefaults,
     });

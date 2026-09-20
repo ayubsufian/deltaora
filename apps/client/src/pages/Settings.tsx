@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
   AlertCircle,
-  Building2,
-  CheckCircle2,
   Camera,
   Copy,
   Download,
   KeyRound,
   Moon,
-  Plus,
-  RefreshCw,
   ShieldCheck,
   Sun,
   Trash2,
@@ -178,12 +174,6 @@ const defaultCrawlerDefaults: CrawlerDefaults = {
   apiCapture: false,
   screenshotDiff: false,
   includeFeeds: true,
-};
-
-const roleTone: Record<WorkspaceSummary['role'], string> = {
-  owner: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900',
-  editor: 'bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900',
-  viewer: 'bg-gray-100 text-gray-700 ring-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-700',
 };
 
 function roleLabel(role?: WorkspaceSummary['role'] | Member['role']) {
@@ -396,9 +386,6 @@ export function Settings() {
   const [avatarError, setAvatarError] = useState('');
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
-  const [workspacesError, setWorkspacesError] = useState('');
-  const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings | null>(null);
   const [isLoadingWorkspaceSettings, setIsLoadingWorkspaceSettings] = useState(false);
   const [workspaceSettingsError, setWorkspaceSettingsError] = useState('');
@@ -440,7 +427,7 @@ export function Settings() {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [workspaceAction, setWorkspaceAction] = useState<'create' | 'save' | 'transfer' | 'delete' | 'member' | 'invite' | null>(null);
+  const [workspaceAction, setWorkspaceAction] = useState<'save' | 'transfer' | 'delete' | 'member' | 'invite' | null>(null);
 
   const activeWorkspace = useMemo(() => {
     return workspaces.find(workspace => workspace.id === activeWorkspaceId) || null;
@@ -449,10 +436,6 @@ export function Settings() {
     return user?.role === 'admin' || members.some(member => member.id === user?.id && member.role === 'owner');
   }, [members, user?.id, user?.role]);
   const hasOtherSessions = useMemo(() => sessions.some(session => !session.current), [sessions]);
-  const workspaceNameError = useMemo(() => {
-    const length = newWorkspaceName.trim().length;
-    return length > 0 && length < 2 ? 'Use at least 2 characters.' : undefined;
-  }, [newWorkspaceName]);
   const activeOwnerCount = useMemo(() => members.filter(member => member.role === 'owner').length, [members]);
 
   useEffect(() => {
@@ -463,8 +446,6 @@ export function Settings() {
   }, [user]);
 
   const fetchWorkspaces = useCallback(async (preferredWorkspaceId?: string | null) => {
-    setIsLoadingWorkspaces(true);
-    setWorkspacesError('');
     try {
       const res = await api.get('/workspaces');
       const data: WorkspaceSummary[] = res.data || [];
@@ -481,12 +462,9 @@ export function Settings() {
       }
 
       return data;
-    } catch (error) {
+    } catch {
       setWorkspaces([]);
-      setWorkspacesError(errorMessage(error, 'Could not load workspaces.'));
       return [];
-    } finally {
-      setIsLoadingWorkspaces(false);
     }
   }, [activeWorkspaceId, setActiveWorkspaceId]);
 
@@ -620,11 +598,6 @@ export function Settings() {
     fetchWorkspaceSettings();
     fetchAuditLogs(1);
   }, [activeWorkspaceId, fetchAuditLogs, fetchInvites, fetchMembers, fetchWorkspaceSettings]);
-
-  const selectWorkspace = (workspaceId: string) => {
-    if (workspaceId === activeWorkspaceId) return;
-    setActiveWorkspaceId(workspaceId);
-  };
 
   const requestStepUp = useCallback((options: { requireMfa?: boolean; reason: string }) => {
     const mustUseMfa = options.requireMfa || mfaEnabled || user?.role === 'admin';
@@ -1019,26 +992,6 @@ export function Settings() {
     }
   };
 
-  const createWorkspace = async () => {
-    const name = newWorkspaceName.trim();
-    if (name.length < 2) return;
-    setWorkspaceAction('create');
-    try {
-      await requestStepUp({ reason: 'Create a workspace' });
-      const res = await api.post('/workspaces', { name });
-      setNewWorkspaceName('');
-      setActiveWorkspaceId(res.data.id);
-      await fetchWorkspaces(res.data.id);
-      toast.success('Workspace created');
-    } catch (error) {
-      if ((error as Error).message !== 'Step-up cancelled') {
-        toast.error(errorMessage(error, 'Failed to create workspace'));
-      }
-    } finally {
-      setWorkspaceAction(null);
-    }
-  };
-
   const transferWorkspaceOwnership = async () => {
     if (!activeWorkspaceId || !transferOwnerId) return;
     setWorkspaceAction('transfer');
@@ -1341,112 +1294,6 @@ export function Settings() {
             <p className="sr-only" aria-live="polite">
               {activeWorkspace ? `${activeWorkspace.name} workspace selected.` : 'No workspace selected.'}
             </p>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-              <div className="rounded-md border border-gray-200 dark:border-gray-800">
-                <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-gray-950 dark:text-white">Workspaces</div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{workspaces.length} available</p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fetchWorkspaces(activeWorkspaceId)}
-                    isLoading={isLoadingWorkspaces}
-                    aria-label="Refresh workspaces"
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" /> Refresh
-                  </Button>
-                </div>
-
-                {workspacesError && (
-                  <div className="m-4 flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>{workspacesError}</span>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => fetchWorkspaces(activeWorkspaceId)}>Retry</Button>
-                  </div>
-                )}
-
-                {isLoadingWorkspaces && workspaces.length === 0 ? (
-                  <div className="space-y-2 p-4" aria-label="Loading workspaces">
-                    {[0, 1, 2].map(item => (
-                      <div key={item} className="h-16 animate-pulse rounded-md bg-gray-100 dark:bg-gray-800" />
-                    ))}
-                  </div>
-                ) : workspaces.length === 0 && !workspacesError ? (
-                  <div className="p-6 text-center">
-                    <Building2 className="mx-auto h-8 w-8 text-gray-400" aria-hidden="true" />
-                    <p className="mt-2 text-sm font-medium text-gray-950 dark:text-white">No workspaces yet</p>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Create one to start monitoring pages with a team.</p>
-                  </div>
-                ) : (
-                  <ul className="max-h-80 space-y-2 overflow-y-auto p-3" role="list" aria-label="Workspace list">
-                    {workspaces.map(workspace => {
-                      const isActive = workspace.id === activeWorkspaceId;
-                      return (
-                        <li key={workspace.id}>
-                          <button
-                            type="button"
-                            aria-pressed={isActive}
-                            onClick={() => selectWorkspace(workspace.id)}
-                            className={`flex min-h-16 w-full items-center gap-3 rounded-md border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950 ${
-                              isActive
-                                ? 'border-blue-500 bg-blue-50 text-blue-950 dark:border-blue-400 dark:bg-blue-950/40 dark:text-blue-100'
-                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-800 dark:hover:border-gray-700 dark:hover:bg-gray-900'
-                            }`}
-                          >
-                            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${
-                              isActive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-300'
-                            }`}>
-                              {isActive ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> : <Building2 className="h-5 w-5" aria-hidden="true" />}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-semibold text-gray-950 dark:text-white">{workspace.name}</span>
-                              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                <span className={`rounded-full px-2 py-0.5 font-medium ring-1 ${roleTone[workspace.role]}`}>
-                                  {roleLabel(workspace.role)}
-                                </span>
-                                <span>{workspace.memberCount} {workspace.memberCount === 1 ? 'member' : 'members'}</span>
-                                <span>Created {formatDate(workspace.createdAt)}</span>
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-
-              <form
-                id="new-workspace"
-                className="rounded-md border border-gray-200 p-4 dark:border-gray-800"
-                onSubmit={event => {
-                  event.preventDefault();
-                  createWorkspace();
-                }}
-              >
-                <Input
-                  label="New workspace"
-                  value={newWorkspaceName}
-                  onChange={event => setNewWorkspaceName(event.target.value)}
-                  placeholder="Marketing monitors"
-                  maxLength={100}
-                  error={workspaceNameError}
-                />
-                <Button
-                  type="submit"
-                  className="mt-3 w-full"
-                  isLoading={workspaceAction === 'create'}
-                  disabled={Boolean(workspaceNameError) || newWorkspaceName.trim().length < 2}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Create workspace
-                </Button>
-              </form>
-            </div>
 
             {(workspaceSettings || isLoadingWorkspaceSettings || workspaceSettingsError) && (
               <div className="grid gap-3 rounded-md border border-gray-200 p-3 dark:border-gray-800 sm:grid-cols-3">

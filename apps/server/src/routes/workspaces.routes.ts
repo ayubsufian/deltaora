@@ -29,7 +29,10 @@ router.use(requireVerifiedEmail);
 // Join workspace doesn't need resolveAbility because they aren't in the workspace yet
 router.post('/join', validate(z.object({ inviteToken: z.string() })), joinWorkspace);
 router.get('/', listWorkspaces);
-router.post('/', requireRecentStepUp(), validate(z.object({ name: z.string().trim().min(2).max(100) }).strict()), createWorkspace);
+router.post('/', validate(z.object({
+  name: z.string().trim().min(2).max(100),
+  emoji: z.string().trim().min(1).max(8).optional(),
+}).strict()), createWorkspace);
 
 const crawlerDefaultsSchema = z.object({
   respectRobots: z.boolean(),
@@ -50,6 +53,7 @@ router.patch(
   requireRecentStepUp(),
   validate(z.object({
     name: z.string().trim().min(2).max(100).optional(),
+    emoji: z.string().trim().min(1).max(8).optional(),
     crawlerDefaults: crawlerDefaultsSchema.optional(),
     notificationDefaults: notificationDefaultsSchema.optional(),
   }).strict()),
