@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -12,7 +12,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createPageSchema } from '@deltaora/validation';
 import { z } from 'zod';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   usePages,
   useCreatePage,
@@ -25,6 +25,7 @@ import {
 } from '../hooks/useApi';
 import { formatDateRelative } from '@deltaora/shared-utils';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
 
 const updatePageSchema = createPageSchema.extend({
   id: z.string(),
@@ -52,6 +53,8 @@ const safeJson = (value: string) => {
 };
 
 export function MonitoredPages() {
+  const [searchParams] = useSearchParams();
+  const { activeWorkspaceId, setActiveWorkspaceId } = useAuth();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -108,7 +111,17 @@ export function MonitoredPages() {
     endDate = end.toISOString();
   }
 
+  const isAllWorkspacesView = searchParams.get('scope') === 'all';
+  const requestedWorkspaceId = searchParams.get('workspace');
+
+  useEffect(() => {
+    if (requestedWorkspaceId && requestedWorkspaceId !== activeWorkspaceId) {
+      setActiveWorkspaceId(requestedWorkspaceId);
+    }
+  }, [activeWorkspaceId, requestedWorkspaceId, setActiveWorkspaceId]);
+
   const { data: pages, isLoading } = usePages({
+    allWorkspaces: isAllWorkspacesView,
     category: categoryFilter || undefined,
     status: statusFilter || undefined,
     importance: importanceFilter || undefined,
@@ -288,9 +301,11 @@ export function MonitoredPages() {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Monitored Pages</h2>
+          <h2 className="text-3xl font-bold tracking-tight">{isAllWorkspacesView ? 'All Pages' : 'Monitored Pages'}</h2>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
-            Manage the URLs you are tracking for changes.
+            {isAllWorkspacesView
+              ? 'Review monitored URLs across every workspace you can access.'
+              : 'Manage the URLs you are tracking for changes.'}
           </p>
         </div>
         <Button onClick={() => setIsAddModalOpen(true)}>
@@ -388,7 +403,13 @@ export function MonitoredPages() {
                   <tr key={page._id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
-                        <Link to={`/pages/${page._id}`} className="font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400">
+                        <Link
+                          to={`/pages/${page._id}`}
+                          onClick={() => {
+                            if (page.workspaceId) setActiveWorkspaceId(String(page.workspaceId));
+                          }}
+                          className="font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
+                        >
                           {page.title}
                         </Link>
                         <div className="flex items-center text-xs text-gray-500 mt-1">
@@ -428,7 +449,12 @@ export function MonitoredPages() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Link to={`/pages/${page._id}`}>
+                        <Link
+                          to={`/pages/${page._id}`}
+                          onClick={() => {
+                            if (page.workspaceId) setActiveWorkspaceId(String(page.workspaceId));
+                          }}
+                        >
                           <Button variant="ghost" size="icon" title="View details">
                              <SearchIcon size={16} />
                           </Button>

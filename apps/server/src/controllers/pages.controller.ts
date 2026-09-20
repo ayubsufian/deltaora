@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { MonitoredPage } from '../models/MonitoredPage';
+import { Workspace } from '../models/Workspace';
 import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
 import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
@@ -29,16 +30,22 @@ const splitCrawlerConfig = (crawlerConfig: any) => {
 export const getPages = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workspaceId = req.workspaceId;
-    const { category, status, importance, search, startDate, endDate } = req.query;
+    const { category, status, importance, search, startDate, endDate, allWorkspaces } = req.query;
 
-    if (!workspaceId) {
+    if (!workspaceId && allWorkspaces !== 'true') {
       return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
     }
 
-    // CASL check: can the user read MonitoredPages in this workspace?
-    ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+    let query: any;
 
-    const query: any = { workspaceId };
+    if (allWorkspaces === 'true') {
+      const workspaces = await Workspace.find({ 'members.userId': req.user!.userId }).select('_id');
+      query = { workspaceId: { $in: workspaces.map(workspace => workspace._id) } };
+    } else {
+      // CASL check: can the user read MonitoredPages in this workspace?
+      ForbiddenError.from(req.ability!).throwUnlessCan('read', 'MonitoredPage');
+      query = { workspaceId };
+    }
 
     if (category) query.category = category;
     if (status) query.status = status;

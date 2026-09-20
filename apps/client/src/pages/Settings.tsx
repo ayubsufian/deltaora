@@ -1422,6 +1422,7 @@ export function Settings() {
               </div>
 
               <form
+                id="new-workspace"
                 className="rounded-md border border-gray-200 p-4 dark:border-gray-800"
                 onSubmit={event => {
                   event.preventDefault();

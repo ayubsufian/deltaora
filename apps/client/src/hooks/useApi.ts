@@ -42,6 +42,7 @@ export function useTimeseriesStats() {
 interface MonitoredPage {
   _id: string;
   userId: string;
+  workspaceId: string;
   url: string;
   title: string;
   category: string;
@@ -70,11 +71,12 @@ interface CrawlerAuthSession {
   updatedAt: string;
 }
 
-export function usePages(filters?: { category?: string; status?: string; importance?: string; search?: string; startDate?: string; endDate?: string }) {
+export function usePages(filters?: { category?: string; status?: string; importance?: string; search?: string; startDate?: string; endDate?: string; allWorkspaces?: boolean }) {
   return useQuery({
     queryKey: ['pages', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
+      if (filters?.allWorkspaces) params.set('allWorkspaces', 'true');
       if (filters?.category) params.set('category', filters.category);
       if (filters?.status) params.set('status', filters.status);
       if (filters?.importance) params.set('importance', filters.importance);
