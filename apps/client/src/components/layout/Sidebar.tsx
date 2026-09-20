@@ -53,8 +53,12 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
   const [renamingWorkspace, setRenamingWorkspace] = useState<WorkspaceSummary | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [renameEmoji, setRenameEmoji] = useState('📗');
   const [renameError, setRenameError] = useState('');
   const [isSavingRename, setIsSavingRename] = useState(false);
+  const renameEmojiButtonRef = useRef<HTMLButtonElement>(null);
+  // Tracks which modal's emoji button triggered the picker
+  const [emojiPickerTarget, setEmojiPickerTarget] = useState<'create' | 'rename'>('create');
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isAllPagesActive = location.pathname === '/pages' && searchParams.get('scope') === 'all';
@@ -124,74 +128,71 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
   const openRenameModal = (workspace: WorkspaceSummary) => {
     setRenamingWorkspace(workspace);
     setRenameValue(workspace.name);
+    setRenameEmoji(workspace.emoji || '📗');
     setRenameError('');
+    setIsEmojiPickerOpen(false);
   };
 
   const closeRenameModal = () => {
     if (isSavingRename) return;
     setRenamingWorkspace(null);
     setRenameError('');
+    setIsEmojiPickerOpen(false);
   };
 
   const saveRename = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     if (!renamingWorkspace) return;
     const name = renameValue.trim();
+    const emoji = renameEmoji.trim() || '📗';
     if (name.length < 2) {
       setRenameError('Name must be at least 2 characters.');
       return;
     }
-    if (name === renamingWorkspace.name) {
+    if (name === renamingWorkspace.name && emoji === (renamingWorkspace.emoji || '📗')) {
       closeRenameModal();
       return;
     }
     setIsSavingRename(true);
     setRenameError('');
     try {
-      await api.patch(`/workspaces/${renamingWorkspace.id}/settings`, { name });
+      await api.patch(`/workspaces/${renamingWorkspace.id}/settings`, { name, emoji });
       await fetchWorkspaces();
-      toast.success('Workspace renamed');
+      toast.success('Workspace updated');
       setRenamingWorkspace(null);
     } catch (error: any) {
-      setRenameError(error.response?.data?.error || 'Failed to rename workspace.');
+      setRenameError(error.response?.data?.error || 'Failed to update workspace.');
     } finally {
       setIsSavingRename(false);
     }
   };
 
-  const openEmojiPicker = () => {
-    if (!emojiButtonRef.current) return;
-    const rect = emojiButtonRef.current.getBoundingClientRect();
+  const openEmojiPicker = (ref: React.RefObject<HTMLButtonElement>, target: 'create' | 'rename') => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
     const pickerWidth = 352;
-    const pickerHeight = 500; // emoji-mart height: search bar + category tabs + emoji grid
+    const pickerHeight = 500;
     const gap = 8;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
 
-    // Horizontal: align to button left, but clamp so picker never overflows right or left edge
     let left = rect.left;
-    if (left + pickerWidth > viewportW - gap) {
-      left = viewportW - pickerWidth - gap;
-    }
+    if (left + pickerWidth > viewportW - gap) left = viewportW - pickerWidth - gap;
     left = Math.max(gap, left);
 
-    // Vertical: prefer opening below the button
     let top = rect.bottom + gap;
     const fitsBelow = top + pickerHeight <= viewportH - gap;
     const fitsAbove = rect.top - gap - pickerHeight >= gap;
 
     if (!fitsBelow && fitsAbove) {
-      // Flip above
       top = rect.top - pickerHeight - gap;
     } else if (!fitsBelow && !fitsAbove) {
-      // Neither fits perfectly — anchor to top of viewport with a small margin
       top = gap;
     }
-
-    // Hard clamp: never let top go above the viewport
     top = Math.max(gap, top);
 
     setPickerStyle({ position: 'fixed', top, left, zIndex: 9999 });
+    setEmojiPickerTarget(target);
     setIsEmojiPickerOpen(true);
   };
 
@@ -418,10 +419,10 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                       ref={emojiButtonRef}
                       type="button"
                       onClick={() => {
-                        if (isEmojiPickerOpen) {
+                        if (isEmojiPickerOpen && emojiPickerTarget === 'create') {
                           setIsEmojiPickerOpen(false);
                         } else {
-                          openEmojiPicker();
+                          openEmojiPicker(emojiButtonRef, 'create');
                         }
                       }}
                       className="flex h-12 w-16 items-center justify-center rounded-md border border-blue-300 bg-white px-2 text-2xl outline-none ring-offset-white transition-colors hover:bg-blue-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-blue-800 dark:bg-gray-950 dark:hover:bg-gray-900 dark:ring-offset-gray-900"
@@ -490,7 +491,11 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
             <Picker
               data={data}
               onEmojiSelect={(emoji: { native: string }) => {
-                setNewWorkspaceEmoji(emoji.native);
+                if (emojiPickerTarget === 'rename') {
+                  setRenameEmoji(emoji.native);
+                } else {
+                  setNewWorkspaceEmoji(emoji.native);
+                }
                 setIsEmojiPickerOpen(false);
               }}
               theme="auto"
@@ -516,32 +521,55 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
             className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
             onMouseDown={e => e.stopPropagation()}
           >
-            {/* Header */}
+            {/* Header — live preview updates as user edits */}
             <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-4 dark:border-gray-800">
-              <span className="text-2xl" aria-hidden="true">{renamingWorkspace.emoji || '📗'}</span>
+              <span className="text-2xl" aria-hidden="true">{renameEmoji || '📗'}</span>
               <p id="rename-workspace-title" className="text-sm font-semibold text-gray-950 dark:text-white">
-                Rename workspace
+                Edit workspace
               </p>
             </div>
 
             <form onSubmit={saveRename}>
-              <div className="px-5 py-4">
-                <label className="block">
-                  <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
-                    Workspace name
-                  </span>
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={e => { setRenameValue(e.target.value); setRenameError(''); }}
-                    onFocus={e => e.target.select()}
-                    onKeyDown={e => { if (e.key === 'Escape') closeRenameModal(); }}
-                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
-                    maxLength={100}
-                  />
-                </label>
+              <div className="px-5 py-4 space-y-4">
+                {/* Emoji + Name row — mirrors the create modal layout */}
+                <div className="grid gap-3 grid-cols-[56px_1fr]">
+                  <div>
+                    <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">Emoji</span>
+                    <button
+                      ref={renameEmojiButtonRef}
+                      type="button"
+                      onClick={() => {
+                        if (isEmojiPickerOpen && emojiPickerTarget === 'rename') {
+                          setIsEmojiPickerOpen(false);
+                        } else {
+                          openEmojiPicker(renameEmojiButtonRef, 'rename');
+                        }
+                      }}
+                      className="flex h-10 w-14 items-center justify-center rounded-lg border border-blue-300 bg-white text-xl outline-none ring-offset-white transition-colors hover:bg-blue-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-blue-800 dark:bg-gray-950 dark:hover:bg-gray-900 dark:ring-offset-gray-900"
+                      aria-label="Choose workspace emoji"
+                      aria-expanded={isEmojiPickerOpen && emojiPickerTarget === 'rename'}
+                      aria-haspopup="dialog"
+                    >
+                      {renameEmoji || '📗'}
+                    </button>
+                  </div>
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Workspace name
+                    </span>
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={e => { setRenameValue(e.target.value); setRenameError(''); }}
+                      onFocus={e => e.target.select()}
+                      onKeyDown={e => { if (e.key === 'Escape') closeRenameModal(); }}
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-950 outline-none ring-offset-white transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                      maxLength={100}
+                    />
+                  </label>
+                </div>
                 {renameError && (
-                  <p role="alert" className="mt-2 text-xs font-medium text-red-600 dark:text-red-400">
+                  <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
                     {renameError}
                   </p>
                 )}
