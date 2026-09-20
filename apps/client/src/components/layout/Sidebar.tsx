@@ -121,21 +121,33 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
     if (!emojiButtonRef.current) return;
     const rect = emojiButtonRef.current.getBoundingClientRect();
     const pickerWidth = 352;
-    const pickerHeight = 435;
+    const pickerHeight = 500; // emoji-mart height: search bar + category tabs + emoji grid
+    const gap = 8;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
 
+    // Horizontal: align to button left, but clamp so picker never overflows right or left edge
     let left = rect.left;
-    let top = rect.bottom + 8;
+    if (left + pickerWidth > viewportW - gap) {
+      left = viewportW - pickerWidth - gap;
+    }
+    left = Math.max(gap, left);
 
-    // Flip left if it would overflow right edge
-    if (left + pickerWidth > viewportW - 8) {
-      left = viewportW - pickerWidth - 8;
+    // Vertical: prefer opening below the button
+    let top = rect.bottom + gap;
+    const fitsBelow = top + pickerHeight <= viewportH - gap;
+    const fitsAbove = rect.top - gap - pickerHeight >= gap;
+
+    if (!fitsBelow && fitsAbove) {
+      // Flip above
+      top = rect.top - pickerHeight - gap;
+    } else if (!fitsBelow && !fitsAbove) {
+      // Neither fits perfectly — anchor to top of viewport with a small margin
+      top = gap;
     }
-    // Flip above if it would overflow bottom
-    if (top + pickerHeight > viewportH - 8) {
-      top = rect.top - pickerHeight - 8;
-    }
+
+    // Hard clamp: never let top go above the viewport
+    top = Math.max(gap, top);
 
     setPickerStyle({ position: 'fixed', top, left, zIndex: 9999 });
     setIsEmojiPickerOpen(true);
@@ -218,7 +230,7 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col" aria-label="Workspace navigation">
-        <div className={`min-h-0 flex-1 space-y-1 overflow-y-auto py-4 ${isCollapsed ? 'px-3' : 'px-4'}`}>
+        <div className={`min-h-0 flex-1 space-y-1 py-4 ${isCollapsed ? 'overflow-hidden px-3' : 'overflow-y-auto px-4'}`}>
           <Link
             to="/pages?scope=all"
             aria-current={isAllPagesActive ? 'page' : undefined}
@@ -415,7 +427,11 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
             style={{ zIndex: 9998 }}
             onMouseDown={() => setIsEmojiPickerOpen(false)}
           />
-          <div style={pickerStyle}>
+          <div style={{
+            ...pickerStyle,
+            maxHeight: `calc(100vh - ${(pickerStyle.top as number ?? 8) + 8}px)`,
+            overflowY: 'auto',
+          }}>
             <Picker
               data={data}
               onEmojiSelect={(emoji: { native: string }) => {
