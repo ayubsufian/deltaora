@@ -13,6 +13,8 @@
   "dependencies": {
     "@deltaora/shared-utils": "workspace:*",
     "@deltaora/validation": "workspace:*",
+    "@emoji-mart/data": "^1.2.1",
+    "@emoji-mart/react": "^1.1.1",
     "@hookform/resolvers": "^3.9.0",
     "@react-oauth/google": "^0.13.5",
     "@simplewebauthn/browser": "^13.3.0",
