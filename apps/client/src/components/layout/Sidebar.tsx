@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BarChart3, Globe, LayoutDashboard, LogOut, Pencil, Plus, Settings } from 'lucide-react';
+import { BarChart3, Globe, LayoutDashboard, LogOut, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { Avatar } from '../ui/Avatar';
@@ -59,6 +59,12 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
   const renameEmojiButtonRef = useRef<HTMLButtonElement>(null);
   // Tracks which modal's emoji button triggered the picker
   const [emojiPickerTarget, setEmojiPickerTarget] = useState<'create' | 'rename'>('create');
+  // Delete workspace modal
+  const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceSummary | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false);
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const isAllPagesActive = location.pathname === '/pages' && searchParams.get('scope') === 'all';
@@ -164,6 +170,59 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
       setRenameError(error.response?.data?.error || 'Failed to update workspace.');
     } finally {
       setIsSavingRename(false);
+    }
+  };
+
+  const openDeleteModal = (workspace: WorkspaceSummary) => {
+    setDeletingWorkspace(workspace);
+    setDeleteConfirmName('');
+    setDeletePassword('');
+    setDeleteError('');
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeletingWorkspace) return;
+    setDeletingWorkspace(null);
+    setDeleteError('');
+  };
+
+  const confirmDelete = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    if (!deletingWorkspace) return;
+    if (deleteConfirmName !== deletingWorkspace.name) {
+      setDeleteError('Workspace name does not match. Please type it exactly.');
+      return;
+    }
+    if (!deletePassword.trim()) {
+      setDeleteError('Please enter your password to confirm.');
+      return;
+    }
+    setIsDeletingWorkspace(true);
+    setDeleteError('');
+    try {
+      // Step-up reauthentication required before destructive action
+      await api.post('/auth/step-up', { currentPassword: deletePassword });
+      await api.delete(`/workspaces/${deletingWorkspace.id}`);
+      const remaining = workspaces.filter(w => w.id !== deletingWorkspace.id);
+      setWorkspaces(remaining);
+      if (activeWorkspaceId === deletingWorkspace.id) {
+        const next = remaining[0]?.id || null;
+        setActiveWorkspaceId(next);
+        navigate(next ? `/pages?workspace=${next}` : '/dashboard');
+      }
+      toast.success('Workspace deleted');
+      setDeletingWorkspace(null);
+    } catch (error: any) {
+      const code = error.response?.data?.code;
+      if (code === 'MFA_STEP_UP_REQUIRED') {
+        setDeleteError('Your account uses two-factor authentication. Please delete this workspace from Settings → Workspace.');
+      } else if (error.response?.status === 401 || code === 'STEP_UP_REQUIRED') {
+        setDeleteError('Incorrect password. Please try again.');
+      } else {
+        setDeleteError(error.response?.data?.error || 'Failed to delete workspace. Please try again.');
+      }
+    } finally {
+      setIsDeletingWorkspace(false);
     }
   };
 
@@ -293,6 +352,10 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
               searchParams.get('scope') !== 'all' &&
               activeWorkspaceId === workspace.id;
             const canRename = workspace.role === 'owner' || workspace.role === 'editor';
+            const isOwnerRole = workspace.role === 'owner';
+            const linkRightPad = !isCollapsed
+              ? (isOwnerRole ? 'pr-16' : canRename ? 'pr-8' : '')
+              : '';
 
             return (
               <div key={workspace.id} className="group relative flex items-center">
@@ -300,7 +363,7 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                   to={`/pages?workspace=${workspace.id}`}
                   onClick={() => handleWorkspaceClick(workspace.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`${navBaseClass(isCollapsed)} ${navStateClass(isActive)} flex-1 ${!isCollapsed && canRename ? 'pr-8' : ''}`}
+                  className={`${navBaseClass(isCollapsed)} ${navStateClass(isActive)} flex-1 ${linkRightPad}`}
                   title={workspace.name}
                 >
                   <span className={`${isCollapsed ? '' : 'mr-3'} shrink-0 text-lg leading-none`} aria-hidden="true">
@@ -308,20 +371,36 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                   </span>
                   <span className={isCollapsed ? 'sr-only' : 'truncate'}>{workspace.name}</span>
                 </Link>
+
+                {/* Pencil — owners and editors; shifts left when trash is also present */}
                 {!isCollapsed && canRename && (
                   <button
                     type="button"
                     onClick={e => { e.preventDefault(); e.stopPropagation(); openRenameModal(workspace); }}
-                    className="absolute right-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                    className={`absolute ${isOwnerRole ? 'right-8' : 'right-1.5'} flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-700 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:bg-gray-700 dark:hover:text-gray-200`}
                     aria-label={`Rename ${workspace.name}`}
                     title="Rename workspace"
                   >
                     <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 )}
+
+                {/* Trash — owners only */}
+                {!isCollapsed && isOwnerRole && (
+                  <button
+                    type="button"
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); openDeleteModal(workspace); }}
+                    className="absolute right-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                    aria-label={`Delete ${workspace.name}`}
+                    title="Delete workspace"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             );
           })}
+
 
           <button
             type="button"
@@ -590,6 +669,97 @@ export function Sidebar({ isCollapsed, onToggleCollapsed }: SidebarProps) {
                   className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-gray-900"
                 >
                   {isSavingRename ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {deletingWorkspace && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md"
+          role="presentation"
+          onMouseDown={closeDeleteModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-workspace-title"
+            className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900"
+            onMouseDown={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b border-red-100 bg-red-50 px-5 py-4 dark:border-red-900/40 dark:bg-red-950/30">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/60">
+                <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" aria-hidden="true" />
+              </div>
+              <p id="delete-workspace-title" className="text-sm font-semibold text-red-900 dark:text-red-200">
+                Delete workspace
+              </p>
+            </div>
+
+            <form onSubmit={confirmDelete}>
+              <div className="px-5 py-4 space-y-4">
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                  This will permanently delete{' '}
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    {deletingWorkspace.emoji} {deletingWorkspace.name}
+                  </span>{' '}
+                  and all its monitors, snapshots, history, invites, and API keys. This cannot be undone.
+                </p>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Type <span className="font-semibold text-gray-900 dark:text-white">{deletingWorkspace.name}</span> to confirm
+                  </span>
+                  <input
+                    autoFocus
+                    value={deleteConfirmName}
+                    onChange={e => { setDeleteConfirmName(e.target.value); setDeleteError(''); }}
+                    onKeyDown={e => { if (e.key === 'Escape') closeDeleteModal(); }}
+                    placeholder={deletingWorkspace.name}
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-950 outline-none ring-offset-white transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                    maxLength={200}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Your password
+                  </span>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={e => { setDeletePassword(e.target.value); setDeleteError(''); }}
+                    onKeyDown={e => { if (e.key === 'Escape') closeDeleteModal(); }}
+                    placeholder="Enter your password"
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-950 outline-none ring-offset-white transition-colors focus:border-red-500 focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-950 dark:text-white dark:ring-offset-gray-900"
+                  />
+                </label>
+
+                {deleteError && (
+                  <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+                    {deleteError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={closeDeleteModal}
+                  disabled={isDeletingWorkspace}
+                  className="h-9 rounded-lg px-4 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:focus-visible:ring-offset-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeletingWorkspace || deleteConfirmName !== deletingWorkspace.name || !deletePassword.trim()}
+                  className="h-9 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-gray-900"
+                >
+                  {isDeletingWorkspace ? 'Deleting…' : 'Delete workspace'}
                 </button>
               </div>
             </form>

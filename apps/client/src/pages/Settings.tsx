@@ -1011,31 +1011,6 @@ export function Settings() {
     }
   };
 
-  const deleteWorkspace = () => {
-    if (!activeWorkspaceId || !workspaceSettings) return;
-    askConfirm({
-      title: 'Delete workspace',
-      description: `${workspaceSettings.name} and its monitors, snapshots, summaries, invites, and crawler auth sessions will be deleted.`,
-      confirmation: workspaceSettings.name,
-      confirmationValue: '',
-      actionLabel: 'Delete workspace',
-      onConfirm: async () => {
-        setWorkspaceAction('delete');
-        try {
-          await requestStepUp({ reason: 'Delete workspace' });
-          await api.delete(`/workspaces/${activeWorkspaceId}`);
-          const remaining = workspaces.filter(workspace => workspace.id !== activeWorkspaceId);
-          setWorkspaces(remaining);
-          const nextWorkspaceId = remaining[0]?.id || null;
-          setActiveWorkspaceId(nextWorkspaceId);
-          await fetchWorkspaces(nextWorkspaceId);
-          toast.success('Workspace deleted');
-        } finally {
-          setWorkspaceAction(null);
-        }
-      },
-    });
-  };
 
   const revokeInvite = (invite: PendingInvite) => askConfirm({
     title: 'Revoke invite',
@@ -1433,19 +1408,6 @@ export function Settings() {
                     Transfer ownership
                   </Button>
                 </div>
-              </div>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                {activeWorkspace && workspaces.length <= 1 && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Create or join another workspace before deleting this one.</p>
-                )}
-                <Button
-                  variant="destructive"
-                  onClick={deleteWorkspace}
-                  isLoading={workspaceAction === 'delete'}
-                  disabled={!isOwner || workspaces.length <= 1 || !workspaceSettings}
-                >
-                  Delete workspace
-                </Button>
               </div>
             </div>
           </CardContent>
