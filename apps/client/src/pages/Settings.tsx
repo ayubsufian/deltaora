@@ -1364,11 +1364,11 @@ export function Settings() {
                 })}
               />
             </SettingRow>
-            <SettingRow title="Auto-dismiss cookie banners" description="Crawler automatically clicks 'Accept' on GDPR/cookie consent banners before capturing page content. Disable for sites where auto-clicking causes issues.">
+            <SettingRow title="Accept cookie banners" description="Crawler automatically clicks 'Accept' on GDPR/cookie consent banners before capturing page content. Disable for sites where auto-clicking causes issues.">
               <Switch
                 checked={workspaceSettings?.crawlerDefaults.acceptCookieBanners ?? true}
                 disabled={!workspaceSettings || !isOwner}
-                label="Auto-dismiss cookie banners"
+                label="Accept cookie banners"
                 onChange={checked => workspaceSettings && setWorkspaceSettings({
                   ...workspaceSettings,
                   crawlerDefaults: { ...workspaceSettings.crawlerDefaults, acceptCookieBanners: checked },
