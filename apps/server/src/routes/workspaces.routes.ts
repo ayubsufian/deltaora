@@ -40,6 +40,7 @@ const crawlerDefaultsSchema = z.object({
   apiCapture: z.boolean(),
   screenshotDiff: z.boolean(),
   includeFeeds: z.boolean(),
+  acceptCookieBanners: z.boolean(),
 }).strict();
 
 const notificationDefaultsSchema = z.object({

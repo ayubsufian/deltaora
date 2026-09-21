@@ -19,6 +19,7 @@ export interface IWorkspaceDocument extends Document {
     apiCapture: boolean;
     screenshotDiff: boolean;
     includeFeeds: boolean;
+    acceptCookieBanners: boolean;
   };
   notificationDefaults: {
     minimumImportance: 'low' | 'medium' | 'high' | 'critical';
@@ -46,6 +47,7 @@ const WorkspaceSchema = new Schema<IWorkspaceDocument>(
       apiCapture: { type: Boolean, default: false },
       screenshotDiff: { type: Boolean, default: false },
       includeFeeds: { type: Boolean, default: true },
+      acceptCookieBanners: { type: Boolean, default: true },
     },
     notificationDefaults: {
       minimumImportance: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },

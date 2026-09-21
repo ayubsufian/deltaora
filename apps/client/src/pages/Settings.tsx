@@ -87,6 +87,7 @@ interface CrawlerDefaults {
   apiCapture: boolean;
   screenshotDiff: boolean;
   includeFeeds: boolean;
+  acceptCookieBanners: boolean;
 }
 
 interface WorkspaceSettings {
@@ -174,6 +175,7 @@ const defaultCrawlerDefaults: CrawlerDefaults = {
   apiCapture: false,
   screenshotDiff: false,
   includeFeeds: true,
+  acceptCookieBanners: true,
 };
 
 function roleLabel(role?: WorkspaceSummary['role'] | Member['role']) {
@@ -1359,6 +1361,17 @@ export function Settings() {
                 onChange={checked => workspaceSettings && setWorkspaceSettings({
                   ...workspaceSettings,
                   crawlerDefaults: { ...workspaceSettings.crawlerDefaults, includeFeeds: checked },
+                })}
+              />
+            </SettingRow>
+            <SettingRow title="Auto-dismiss cookie banners" description="Crawler automatically clicks 'Accept' on GDPR/cookie consent banners before capturing page content. Disable for sites where auto-clicking causes issues.">
+              <Switch
+                checked={workspaceSettings?.crawlerDefaults.acceptCookieBanners ?? true}
+                disabled={!workspaceSettings || !isOwner}
+                label="Auto-dismiss cookie banners"
+                onChange={checked => workspaceSettings && setWorkspaceSettings({
+                  ...workspaceSettings,
+                  crawlerDefaults: { ...workspaceSettings.crawlerDefaults, acceptCookieBanners: checked },
                 })}
               />
             </SettingRow>

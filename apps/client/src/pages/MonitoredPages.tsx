@@ -81,6 +81,7 @@ export function MonitoredPages() {
     paginationMaxPages: 1,
     paginationWaitForSelector: '',
     scrollToBottom: false,
+    acceptCookieBanners: true,
     locale: 'en-US',
     timezoneId: 'America/New_York',
     apiCapture: false,
@@ -175,7 +176,7 @@ export function MonitoredPages() {
         clickText: clickText.length ? clickText : undefined,
         steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
         scrollToBottom: crawlerOptions.scrollToBottom,
-        acceptCookieBanners: true,
+        acceptCookieBanners: crawlerOptions.acceptCookieBanners,
         locale: crawlerOptions.locale || undefined,
         timezoneId: crawlerOptions.timezoneId || undefined,
       },
@@ -651,6 +652,14 @@ export function MonitoredPages() {
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, scrollToBottom: e.target.checked }))}
                   />
                   Scroll page
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={crawlerOptions.acceptCookieBanners}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, acceptCookieBanners: e.target.checked }))}
+                  />
+                  Accept cookie banners
                 </label>
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input
