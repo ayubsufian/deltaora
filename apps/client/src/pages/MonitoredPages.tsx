@@ -696,13 +696,13 @@ export function MonitoredPages() {
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, apiMode: e.target.value }))}
                 />
                 <Input
-                  label="API include"
+                  label="Include URLs"
                   value={crawlerOptions.apiIncludePatterns}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, apiIncludePatterns: e.target.value }))}
                   placeholder="/api/, graphql"
                 />
                 <Input
-                  label="API exclude"
+                  label="Exclude URLs"
                   value={crawlerOptions.apiExcludePatterns}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, apiExcludePatterns: e.target.value }))}
                   placeholder="analytics, tracking"
