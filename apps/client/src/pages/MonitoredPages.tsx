@@ -684,7 +684,7 @@ export function MonitoredPages() {
                     checked={crawlerOptions.apiCapture}
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, apiCapture: e.target.checked }))}
                   />
-                  Capture JSON APIs
+                  API Capture
                 </label>
                 <Select
                   label="API mode"
