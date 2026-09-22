@@ -81,6 +81,7 @@ export function MonitoredPages() {
     paginationMaxPages: 1,
     paginationWaitForSelector: '',
     scrollToBottom: false,
+    waitAfterLoadMs: 0,
     acceptCookieBanners: true,
     locale: 'en-US',
     timezoneId: 'America/New_York',
@@ -176,6 +177,7 @@ export function MonitoredPages() {
         clickText: clickText.length ? clickText : undefined,
         steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
         scrollToBottom: crawlerOptions.scrollToBottom,
+        waitAfterLoadMs: crawlerOptions.waitAfterLoadMs > 0 ? crawlerOptions.waitAfterLoadMs : undefined,
         acceptCookieBanners: crawlerOptions.acceptCookieBanners,
         locale: crawlerOptions.locale || undefined,
         timezoneId: crawlerOptions.timezoneId || undefined,
@@ -570,6 +572,13 @@ export function MonitoredPages() {
                   value={crawlerOptions.waitForSelector}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, waitForSelector: e.target.value }))}
                   placeholder="#content"
+                />
+                <Input
+                  label="Wait after load (ms)"
+                  type="number"
+                  value={crawlerOptions.waitAfterLoadMs || ''}
+                  onChange={(e) => setCrawlerOptions(value => ({ ...value, waitAfterLoadMs: Math.min(30000, Math.max(0, Number(e.target.value))) }))}
+                  placeholder="e.g. 3000"
                 />
                 <Input
                   label="Click selectors"
