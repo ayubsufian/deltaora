@@ -539,7 +539,7 @@ export function MonitoredPages() {
             <div className="space-y-5">
               <div className="grid gap-3 md:grid-cols-2">
                 <Select
-                  label="Saved session"
+                  label="Saved login"
                   options={[
                     { label: 'None', value: '' },
                     ...(authSessions || []).map(session => ({ label: `${session.name} (${session.origin})`, value: session._id })),
