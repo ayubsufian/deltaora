@@ -549,7 +549,7 @@ export function MonitoredPages() {
                 />
                 <div className="flex items-end">
                   <Button type="button" variant="secondary" className="w-full" onClick={() => setIsSessionModalOpen(true)}>
-                    <KeyRound size={16} className="mr-2" /> Save session
+                    <KeyRound size={16} className="mr-2" /> Add login
                   </Button>
                 </div>
               </div>
@@ -802,7 +802,7 @@ export function MonitoredPages() {
         </form>
       </Modal>
 
-      <Modal isOpen={isSessionModalOpen} onClose={() => setIsSessionModalOpen(false)} title="Save Auth Session">
+      <Modal isOpen={isSessionModalOpen} onClose={() => setIsSessionModalOpen(false)} title="Add Saved Login">
         <div className="space-y-4">
           <Input
             label="Name"
@@ -829,7 +829,7 @@ export function MonitoredPages() {
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setIsSessionModalOpen(false)}>Cancel</Button>
-            <Button type="button" onClick={handleCreateSession} isLoading={createAuthSession.isPending}>Save Session</Button>
+            <Button type="button" onClick={handleCreateSession} isLoading={createAuthSession.isPending}>Save login</Button>
           </div>
         </div>
       </Modal>
