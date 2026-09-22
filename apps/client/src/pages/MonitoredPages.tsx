@@ -687,10 +687,10 @@ export function MonitoredPages() {
                   API Capture
                 </label>
                 <Select
-                  label="API mode"
+                  label="Data handling"
                   options={[
-                    { label: 'Append', value: 'append' },
-                    { label: 'Prefer', value: 'prefer' },
+                    { label: 'Append to page', value: 'append' },
+                    { label: 'Replace page', value: 'prefer' },
                   ]}
                   value={crawlerOptions.apiMode}
                   onChange={(e) => setCrawlerOptions(value => ({ ...value, apiMode: e.target.value }))}
