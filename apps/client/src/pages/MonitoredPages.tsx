@@ -676,7 +676,7 @@ export function MonitoredPages() {
                     checked={crawlerOptions.screenshotDiff}
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, screenshotDiff: e.target.checked }))}
                   />
-                  Screenshot fingerprint
+                  Screenshot diffing
                 </label>
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input
