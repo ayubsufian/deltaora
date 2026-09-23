@@ -34,6 +34,64 @@ const updatePageSchema = createPageSchema.extend({
 type CreatePageForm = z.infer<typeof createPageSchema>;
 type UpdatePageForm = z.infer<typeof updatePageSchema>;
 
+const categoryOptions = [
+  { label: 'General', value: 'general' },
+  { label: 'Pricing', value: 'pricing' },
+  { label: 'Policy / legal', value: 'policy' },
+  { label: 'Product', value: 'product' },
+  { label: 'Documentation', value: 'documentation' },
+  { label: 'Status / uptime', value: 'status' },
+  { label: 'Security / trust', value: 'security' },
+  { label: 'Competitor / market', value: 'competitor' },
+  { label: 'Careers', value: 'careers' },
+];
+
+const importanceOptions = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'Critical', value: 'critical' },
+];
+
+const checkIntervalLimits = {
+  min: 5,
+  default: 60,
+  max: 10080,
+};
+
+const defaultCrawlerOptions = {
+  authSessionId: '',
+  includeSelectors: '',
+  excludeSelectors: '',
+  waitForSelector: '',
+  clickSelectors: '',
+  clickText: '',
+  recipeSteps: '',
+  customHeaders: '',
+  paginationNextSelector: '',
+  paginationNextText: '',
+  paginationMaxPages: 1,
+  paginationWaitForSelector: '',
+  scrollToBottom: false,
+  waitAfterLoadMs: 0,
+  acceptCookieBanners: true,
+  locale: 'en-US',
+  timezoneId: 'America/New_York',
+  apiCapture: false,
+  apiMode: 'append',
+  apiIncludePatterns: '',
+  apiExcludePatterns: '',
+  screenshotDiff: false,
+  discoveryEnabled: false,
+  discoveryMaxDepth: 1,
+  discoveryMaxPages: 25,
+  includeSubdomains: false,
+  includeSitemaps: true,
+  includeFeeds: true,
+  respectRobots: true,
+  blockedHandling: 'manual_review',
+};
+
 const crawlBadgeVariant = (status?: string) => {
   if (status === 'success') return 'success';
   if (status === 'blocked' || status === 'auth_required' || status === 'unsupported' || status === 'manual_review') return 'warning';
@@ -47,9 +105,18 @@ const splitList = (value: string) =>
     .map(item => item.trim())
     .filter(Boolean);
 
-const safeJson = (value: string) => {
+const normalizeHttpUrl = (value: string) => {
+  const url = new URL(value.trim());
+  return url.href;
+};
+
+const safeJson = (value: string, label = 'JSON') => {
   if (!value.trim()) return undefined;
-  return JSON.parse(value);
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
 };
 
 export function MonitoredPages() {
@@ -67,38 +134,7 @@ export function MonitoredPages() {
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
   const [discoveryPreview, setDiscoveryPreview] = useState<Array<{ url: string; depth: number; source: string }>>([]);
   const [sessionForm, setSessionForm] = useState({ name: '', origin: '', storageState: '' });
-  const [crawlerOptions, setCrawlerOptions] = useState({
-    authSessionId: '',
-    includeSelectors: '',
-    excludeSelectors: '',
-    waitForSelector: '',
-    clickSelectors: '',
-    clickText: '',
-    recipeSteps: '',
-    customHeaders: '',
-    paginationNextSelector: '',
-    paginationNextText: '',
-    paginationMaxPages: 1,
-    paginationWaitForSelector: '',
-    scrollToBottom: false,
-    waitAfterLoadMs: 0,
-    acceptCookieBanners: true,
-    locale: 'en-US',
-    timezoneId: 'America/New_York',
-    apiCapture: false,
-    apiMode: 'append',
-    apiIncludePatterns: '',
-    apiExcludePatterns: '',
-    screenshotDiff: false,
-    discoveryEnabled: false,
-    discoveryMaxDepth: 1,
-    discoveryMaxPages: 25,
-    includeSubdomains: false,
-    includeSitemaps: true,
-    includeFeeds: true,
-    respectRobots: true,
-    blockedHandling: 'manual_review',
-  });
+  const [crawlerOptions, setCrawlerOptions] = useState(defaultCrawlerOptions);
 
   // Compute date bounds for filter
   let startDate: string | undefined;
@@ -142,7 +178,20 @@ export function MonitoredPages() {
 
   const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<CreatePageForm>({
     resolver: zodResolver(createPageSchema),
+    defaultValues: {
+      category: 'general',
+      importance: 'medium',
+      checkInterval: checkIntervalLimits.default,
+    },
   });
+
+  const closeAddModal = () => {
+    setIsAddModalOpen(false);
+    setDiscoveryPreview([]);
+    setShowAdvancedCrawler(false);
+    setCrawlerOptions(defaultCrawlerOptions);
+    reset();
+  };
 
   const buildCrawlerConfig = () => {
     if (!showAdvancedCrawler) return undefined;
@@ -153,8 +202,16 @@ export function MonitoredPages() {
     const clickText = splitList(crawlerOptions.clickText);
     const apiIncludePatterns = splitList(crawlerOptions.apiIncludePatterns);
     const apiExcludePatterns = splitList(crawlerOptions.apiExcludePatterns);
-    const recipeSteps = safeJson(crawlerOptions.recipeSteps);
-    const customHeaders = safeJson(crawlerOptions.customHeaders);
+    const recipeSteps = safeJson(crawlerOptions.recipeSteps, 'Recipe steps JSON');
+    const customHeaders = safeJson(crawlerOptions.customHeaders, 'Headers JSON');
+
+    if (recipeSteps !== undefined && !Array.isArray(recipeSteps)) {
+      throw new Error('Recipe steps JSON must be an array');
+    }
+
+    if (customHeaders !== undefined && (typeof customHeaders !== 'object' || Array.isArray(customHeaders))) {
+      throw new Error('Headers JSON must be an object');
+    }
 
     return {
       authSessionId: crawlerOptions.authSessionId || undefined,
@@ -177,7 +234,7 @@ export function MonitoredPages() {
         clickText: clickText.length ? clickText : undefined,
         steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
         scrollToBottom: crawlerOptions.scrollToBottom,
-        waitAfterLoadMs: crawlerOptions.waitAfterLoadMs > 0 ? crawlerOptions.waitAfterLoadMs : undefined,
+        waitAfterLoadMs: crawlerOptions.waitAfterLoadMs > 0 ? Math.min(15000, crawlerOptions.waitAfterLoadMs) : undefined,
         acceptCookieBanners: crawlerOptions.acceptCookieBanners,
         locale: crawlerOptions.locale || undefined,
         timezoneId: crawlerOptions.timezoneId || undefined,
@@ -211,13 +268,11 @@ export function MonitoredPages() {
 
   const onSubmit = async (data: CreatePageForm) => {
     try {
-      await createPage.mutateAsync({ ...data, crawlerConfig: buildCrawlerConfig() });
+      await createPage.mutateAsync({ ...data, url: normalizeHttpUrl(data.url), crawlerConfig: buildCrawlerConfig() });
       toast.success('Page added successfully');
-      setIsAddModalOpen(false);
-      setDiscoveryPreview([]);
-      reset();
+      closeAddModal();
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to add page');
+      toast.error(error.response?.data?.error || error.message || 'Failed to add page');
     }
   };
 
@@ -227,7 +282,7 @@ export function MonitoredPages() {
 
   const onEditSubmit = async (data: UpdatePageForm) => {
     try {
-      await updatePage.mutateAsync({ id: data.id, data: { title: data.title, url: data.url, category: data.category, importance: data.importance as any, checkInterval: data.checkInterval } });
+      await updatePage.mutateAsync({ id: data.id, data: { title: data.title, url: normalizeHttpUrl(data.url), category: data.category, importance: data.importance as any, checkInterval: data.checkInterval } });
       toast.success('Page updated successfully');
       setEditingPage(null);
     } catch (error: any) {
@@ -250,7 +305,7 @@ export function MonitoredPages() {
 
     try {
       const result = await discoverSite.mutateAsync({
-        url,
+        url: normalizeHttpUrl(url),
         maxDepth: crawlerOptions.discoveryMaxDepth,
         maxPages: crawlerOptions.discoveryMaxPages,
         includeSubdomains: crawlerOptions.includeSubdomains,
@@ -267,10 +322,14 @@ export function MonitoredPages() {
 
   const handleCreateSession = async () => {
     try {
+      if (!sessionForm.storageState.trim()) {
+        throw new Error('Storage state JSON is required');
+      }
+
       await createAuthSession.mutateAsync({
         name: sessionForm.name,
-        origin: sessionForm.origin,
-        storageState: safeJson(sessionForm.storageState) as Record<string, unknown>,
+        origin: normalizeHttpUrl(sessionForm.origin),
+        storageState: safeJson(sessionForm.storageState, 'Storage state JSON') as Record<string, unknown>,
       });
       toast.success('Session saved');
       setSessionForm({ name: '', origin: '', storageState: '' });
@@ -331,13 +390,9 @@ export function MonitoredPages() {
             <Select 
               options={[
                 { label: 'All Categories', value: '' },
-                { label: 'General', value: 'general' },
-                { label: 'Pricing', value: 'pricing' },
-                { label: 'Policy', value: 'policy' },
-                { label: 'Product', value: 'product' },
-                { label: 'Careers', value: 'careers' },
+                ...categoryOptions,
               ]} 
-              className="w-32"
+              className="w-44"
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
             />
@@ -491,37 +546,52 @@ export function MonitoredPages() {
         )}
       </Card>
 
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add Monitored Page" description="Enter the URL and configuration for the page you want to track.">
+      <Modal isOpen={isAddModalOpen} onClose={closeAddModal} title="Add Monitored Page" description="Add an HTTP or HTTPS page and choose how Deltaora should monitor it.">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <Input label="Title" placeholder="e.g. Stripe Pricing Page" {...register('title')} error={errors.title?.message} />
-          <Input label="URL" type="url" placeholder="https://example.com" {...register('url')} error={errors.url?.message} />
+          <Input
+            label="Title"
+            placeholder="e.g. Stripe pricing"
+            autoComplete="off"
+            maxLength={100}
+            {...register('title')}
+            error={errors.title?.message}
+          />
+          <Input
+            label="URL"
+            type="url"
+            placeholder="https://example.com/pricing"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            maxLength={2048}
+            {...register('url')}
+            error={errors.url?.message}
+          />
           
           <Select 
             label="Category" 
-            options={[
-              { label: 'General', value: 'general' },
-              { label: 'Pricing', value: 'pricing' },
-              { label: 'Policy', value: 'policy' },
-              { label: 'Product', value: 'product' },
-              { label: 'Careers', value: 'careers' },
-            ]} 
+            options={categoryOptions} 
             {...register('category')}
             error={errors.category?.message}
           />
 
           <Select 
             label="Importance" 
-            options={[
-              { label: 'Low', value: 'low' },
-              { label: 'Medium', value: 'medium' },
-              { label: 'High', value: 'high' },
-              { label: 'Critical', value: 'critical' },
-            ]} 
+            options={importanceOptions} 
             {...register('importance')}
             error={errors.importance?.message}
           />
           
-          <Input label="Check Interval (minutes)" type="number" defaultValue={60} {...register('checkInterval', { valueAsNumber: true })} error={errors.checkInterval?.message} />
+          <Input
+            label="Check interval (minutes)"
+            type="number"
+            min={checkIntervalLimits.min}
+            max={checkIntervalLimits.max}
+            step={5}
+            inputMode="numeric"
+            {...register('checkInterval', { valueAsNumber: true })}
+            error={errors.checkInterval?.message}
+          />
 
           <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
             <Button
@@ -538,246 +608,303 @@ export function MonitoredPages() {
 
           {showAdvancedCrawler && (
             <div className="space-y-5">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Select
-                  label="Saved login"
-                  options={[
-                    { label: 'None', value: '' },
-                    ...(authSessions || []).map(session => ({ label: `${session.name} (${session.origin})`, value: session._id })),
-                  ]}
-                  value={crawlerOptions.authSessionId}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, authSessionId: e.target.value }))}
-                />
-                <div className="flex items-end">
-                  <Button type="button" variant="secondary" className="w-full" onClick={() => setIsSessionModalOpen(true)}>
-                    <KeyRound size={16} className="mr-2" /> Add login
-                  </Button>
+              <fieldset className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-white">Access</legend>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Select
+                    label="Saved login"
+                    options={[
+                      { label: 'None', value: '' },
+                      ...(authSessions || []).map(session => ({ label: `${session.name} (${session.origin})`, value: session._id })),
+                    ]}
+                    value={crawlerOptions.authSessionId}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, authSessionId: e.target.value }))}
+                  />
+                  <div className="flex items-end">
+                    <Button type="button" variant="secondary" className="w-full" onClick={() => setIsSessionModalOpen(true)}>
+                      <KeyRound size={16} className="mr-2" /> Add login
+                    </Button>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="crawler-headers-json" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Request headers JSON
+                    </label>
+                    <textarea
+                      id="crawler-headers-json"
+                      className="min-h-24 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+                      value={crawlerOptions.customHeaders}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, customHeaders: e.target.value }))}
+                      placeholder='{"Authorization":"Bearer token"}'
+                      spellCheck={false}
+                    />
+                  </div>
                 </div>
-              </div>
+              </fieldset>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <Input
-                  label="Include selectors"
-                  value={crawlerOptions.includeSelectors}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSelectors: e.target.value }))}
-                  placeholder="main, .pricing"
-                />
-                <Input
-                  label="Exclude selectors"
-                  value={crawlerOptions.excludeSelectors}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, excludeSelectors: e.target.value }))}
-                  placeholder=".ads, footer"
-                />
-                <Input
-                  label="Wait selector"
-                  value={crawlerOptions.waitForSelector}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, waitForSelector: e.target.value }))}
-                  placeholder="#content"
-                />
-                <Input
-                  label="Wait after load (ms)"
-                  type="number"
-                  value={crawlerOptions.waitAfterLoadMs || ''}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, waitAfterLoadMs: Math.min(30000, Math.max(0, Number(e.target.value))) }))}
-                  placeholder="e.g. 3000"
-                />
-                <Input
-                  label="Click selectors"
-                  value={crawlerOptions.clickSelectors}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, clickSelectors: e.target.value }))}
-                  placeholder="button.show-more"
-                />
-                <Input
-                  label="Click text"
-                  value={crawlerOptions.clickText}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, clickText: e.target.value }))}
-                  placeholder="Load more, Pricing"
-                />
-                <Input
-                  label="Next selector"
-                  value={crawlerOptions.paginationNextSelector}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextSelector: e.target.value }))}
-                  placeholder="a.next"
-                />
-                <Input
-                  label="Next text"
-                  value={crawlerOptions.paginationNextText}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextText: e.target.value }))}
-                  placeholder="Next"
-                />
-                <Input
-                  label="Pagination pages"
-                  type="number"
-                  value={crawlerOptions.paginationMaxPages}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationMaxPages: Number(e.target.value) }))}
-                />
-                <Input
-                  label="Pagination wait"
-                  value={crawlerOptions.paginationWaitForSelector}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationWaitForSelector: e.target.value }))}
-                  placeholder=".results"
-                />
-                <Input
-                  label="Locale"
-                  value={crawlerOptions.locale}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, locale: e.target.value }))}
-                />
-                <Input
-                  label="Timezone"
-                  value={crawlerOptions.timezoneId}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, timezoneId: e.target.value }))}
-                />
-              </div>
+              <fieldset className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-white">Content targeting</legend>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Input
+                    label="Include selectors"
+                    value={crawlerOptions.includeSelectors}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSelectors: e.target.value }))}
+                    placeholder="main, .pricing"
+                    maxLength={1000}
+                  />
+                  <Input
+                    label="Exclude selectors"
+                    value={crawlerOptions.excludeSelectors}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, excludeSelectors: e.target.value }))}
+                    placeholder=".ads, footer"
+                    maxLength={1000}
+                  />
+                  <Input
+                    label="Wait selector"
+                    value={crawlerOptions.waitForSelector}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, waitForSelector: e.target.value }))}
+                    placeholder="#content"
+                    maxLength={240}
+                  />
+                  <Input
+                    label="Wait after load (ms)"
+                    type="number"
+                    min={0}
+                    max={15000}
+                    step={250}
+                    value={crawlerOptions.waitAfterLoadMs || ''}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, waitAfterLoadMs: Math.min(15000, Math.max(0, Number(e.target.value))) }))}
+                    placeholder="3000"
+                  />
+                  <Input
+                    label="Locale"
+                    value={crawlerOptions.locale}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, locale: e.target.value }))}
+                    placeholder="en-US"
+                    maxLength={35}
+                  />
+                  <Input
+                    label="Timezone"
+                    value={crawlerOptions.timezoneId}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, timezoneId: e.target.value }))}
+                    placeholder="America/New_York"
+                    maxLength={80}
+                  />
+                </div>
+              </fieldset>
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <fieldset className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-white">Page behavior</legend>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Input
+                    label="Click selectors"
+                    value={crawlerOptions.clickSelectors}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, clickSelectors: e.target.value }))}
+                    placeholder="button.show-more"
+                    maxLength={1000}
+                  />
+                  <Input
+                    label="Click text"
+                    value={crawlerOptions.clickText}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, clickText: e.target.value }))}
+                    placeholder="Load more, Pricing"
+                    maxLength={1000}
+                  />
+                  <Input
+                    label="Pagination pages"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={crawlerOptions.paginationMaxPages}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationMaxPages: Math.min(50, Math.max(1, Number(e.target.value))) }))}
+                  />
+                  {crawlerOptions.paginationMaxPages > 1 && (
+                    <>
+                      <Input
+                        label="Next selector"
+                        value={crawlerOptions.paginationNextSelector}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextSelector: e.target.value }))}
+                        placeholder="a.next"
+                        maxLength={240}
+                      />
+                      <Input
+                        label="Next text"
+                        value={crawlerOptions.paginationNextText}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextText: e.target.value }))}
+                        placeholder="Next"
+                        maxLength={120}
+                      />
+                      <Input
+                        label="Pagination wait selector"
+                        value={crawlerOptions.paginationWaitForSelector}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationWaitForSelector: e.target.value }))}
+                        placeholder=".results"
+                        maxLength={240}
+                      />
+                    </>
+                  )}
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={crawlerOptions.scrollToBottom}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, scrollToBottom: e.target.checked }))}
+                    />
+                    Scroll to bottom
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={crawlerOptions.acceptCookieBanners}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, acceptCookieBanners: e.target.checked }))}
+                    />
+                    Accept cookie banners
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={crawlerOptions.screenshotDiff}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, screenshotDiff: e.target.checked }))}
+                    />
+                    Screenshot diffing
+                  </label>
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label htmlFor="crawler-recipe-json" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Recipe steps JSON
                   </label>
                   <textarea
+                    id="crawler-recipe-json"
                     className="min-h-28 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
                     value={crawlerOptions.recipeSteps}
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, recipeSteps: e.target.value }))}
                     placeholder='[{"action":"fill","selector":"#search","value":"pricing"},{"action":"press","selector":"#search","key":"Enter"}]'
+                    spellCheck={false}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Headers JSON
-                  </label>
-                  <textarea
-                    className="min-h-28 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
-                    value={crawlerOptions.customHeaders}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, customHeaders: e.target.value }))}
-                    placeholder='{"Authorization":"Bearer token"}'
-                  />
-                </div>
-              </div>
+              </fieldset>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.scrollToBottom}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, scrollToBottom: e.target.checked }))}
-                  />
-                  Scroll page
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.acceptCookieBanners}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, acceptCookieBanners: e.target.checked }))}
-                  />
-                  Accept cookie banners
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.screenshotDiff}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, screenshotDiff: e.target.checked }))}
-                  />
-                  Screenshot diffing
-                </label>
+              <fieldset className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-white">API capture</legend>
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input
                     type="checkbox"
                     checked={crawlerOptions.apiCapture}
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, apiCapture: e.target.checked }))}
                   />
-                  API Capture
+                  Capture stable API responses
                 </label>
-                <Select
-                  label="Data handling"
-                  options={[
-                    { label: 'Append to page', value: 'append' },
-                    { label: 'Replace page', value: 'prefer' },
-                  ]}
-                  value={crawlerOptions.apiMode}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, apiMode: e.target.value }))}
-                />
-                <Input
-                  label="Include URLs"
-                  value={crawlerOptions.apiIncludePatterns}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, apiIncludePatterns: e.target.value }))}
-                  placeholder="/api/, graphql"
-                />
-                <Input
-                  label="Exclude URLs"
-                  value={crawlerOptions.apiExcludePatterns}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, apiExcludePatterns: e.target.value }))}
-                  placeholder="analytics, tracking"
-                />
-              </div>
+                {crawlerOptions.apiCapture && (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Select
+                      label="Data handling"
+                      options={[
+                        { label: 'Append to page content', value: 'append' },
+                        { label: 'Prefer API response', value: 'prefer' },
+                      ]}
+                      value={crawlerOptions.apiMode}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, apiMode: e.target.value }))}
+                    />
+                    <Input
+                      label="Include URL patterns"
+                      value={crawlerOptions.apiIncludePatterns}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, apiIncludePatterns: e.target.value }))}
+                      placeholder="/api/, graphql"
+                      maxLength={1000}
+                    />
+                    <Input
+                      label="Exclude URL patterns"
+                      value={crawlerOptions.apiExcludePatterns}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, apiExcludePatterns: e.target.value }))}
+                      placeholder="analytics, tracking"
+                      maxLength={1000}
+                    />
+                  </div>
+                )}
+              </fieldset>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.discoveryEnabled}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, discoveryEnabled: e.target.checked }))}
+              <fieldset className="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-gray-800">
+                <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-white">Site discovery and compliance</legend>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={crawlerOptions.discoveryEnabled}
+                      onChange={(e) => {
+                        setCrawlerOptions(value => ({ ...value, discoveryEnabled: e.target.checked }));
+                        if (!e.target.checked) setDiscoveryPreview([]);
+                      }}
+                    />
+                    Add discovered site URLs
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={crawlerOptions.respectRobots}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, respectRobots: e.target.checked }))}
+                    />
+                    Respect robots.txt
+                  </label>
+                  <Select
+                    label="Blocked handling"
+                    options={[
+                      { label: 'Manual review', value: 'manual_review' },
+                      { label: 'Fail crawl', value: 'fail' },
+                    ]}
+                    value={crawlerOptions.blockedHandling}
+                    onChange={(e) => setCrawlerOptions(value => ({ ...value, blockedHandling: e.target.value }))}
                   />
-                  Crawl site
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.includeSitemaps}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSitemaps: e.target.checked }))}
-                  />
-                  Sitemaps
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.includeFeeds}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, includeFeeds: e.target.checked }))}
-                  />
-                  Feeds
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.includeSubdomains}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSubdomains: e.target.checked }))}
-                  />
-                  Subdomains
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    checked={crawlerOptions.respectRobots}
-                    onChange={(e) => setCrawlerOptions(value => ({ ...value, respectRobots: e.target.checked }))}
-                  />
-                  Respect robots.txt
-                </label>
-                <Input
-                  label="Max depth"
-                  type="number"
-                  value={crawlerOptions.discoveryMaxDepth}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, discoveryMaxDepth: Number(e.target.value) }))}
-                />
-                <Input
-                  label="Max pages"
-                  type="number"
-                  value={crawlerOptions.discoveryMaxPages}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, discoveryMaxPages: Number(e.target.value) }))}
-                />
-                <Select
-                  label="Blocked handling"
-                  options={[
-                    { label: 'Manual review', value: 'manual_review' },
-                    { label: 'Fail crawl', value: 'fail' },
-                  ]}
-                  value={crawlerOptions.blockedHandling}
-                  onChange={(e) => setCrawlerOptions(value => ({ ...value, blockedHandling: e.target.value }))}
-                />
-                <div className="flex items-end">
-                  <Button type="button" variant="secondary" className="w-full" onClick={handleDiscoveryPreview} isLoading={discoverSite.isPending}>
-                    <ShieldCheck size={16} className="mr-2" /> Preview URLs
-                  </Button>
                 </div>
-              </div>
+
+                {crawlerOptions.discoveryEnabled && (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={crawlerOptions.includeSitemaps}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSitemaps: e.target.checked }))}
+                      />
+                      Include sitemaps
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={crawlerOptions.includeFeeds}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, includeFeeds: e.target.checked }))}
+                      />
+                      Include feeds
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={crawlerOptions.includeSubdomains}
+                        onChange={(e) => setCrawlerOptions(value => ({ ...value, includeSubdomains: e.target.checked }))}
+                      />
+                      Include subdomains
+                    </label>
+                    <Input
+                      label="Max depth"
+                      type="number"
+                      min={0}
+                      max={5}
+                      value={crawlerOptions.discoveryMaxDepth}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, discoveryMaxDepth: Math.min(5, Math.max(0, Number(e.target.value))) }))}
+                    />
+                    <Input
+                      label="Max pages"
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={crawlerOptions.discoveryMaxPages}
+                      onChange={(e) => setCrawlerOptions(value => ({ ...value, discoveryMaxPages: Math.min(500, Math.max(1, Number(e.target.value))) }))}
+                    />
+                    <div className="flex items-end">
+                      <Button type="button" variant="secondary" className="w-full" onClick={handleDiscoveryPreview} isLoading={discoverSite.isPending}>
+                        <ShieldCheck size={16} className="mr-2" /> Preview URLs
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
               {discoveryPreview.length > 0 && (
                 <div className="max-h-40 overflow-y-auto rounded-md border border-gray-100 dark:border-gray-800">
@@ -793,11 +920,12 @@ export function MonitoredPages() {
                   </table>
                 </div>
               )}
+              </fieldset>
             </div>
           )}
           
           <div className="pt-4 flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setIsAddModalOpen(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={closeAddModal}>Cancel</Button>
             <Button type="submit" isLoading={createPage.isPending}>Add Page</Button>
           </div>
         </form>
@@ -810,6 +938,7 @@ export function MonitoredPages() {
             value={sessionForm.name}
             onChange={(e) => setSessionForm(value => ({ ...value, name: e.target.value }))}
             placeholder="Vendor dashboard"
+            maxLength={100}
           />
           <Input
             label="Origin"
@@ -817,15 +946,21 @@ export function MonitoredPages() {
             value={sessionForm.origin}
             onChange={(e) => setSessionForm(value => ({ ...value, origin: e.target.value }))}
             placeholder="https://example.com"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            maxLength={2048}
           />
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label htmlFor="crawler-storage-state-json" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Storage state JSON
             </label>
             <textarea
+              id="crawler-storage-state-json"
               className="min-h-40 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
               value={sessionForm.storageState}
               onChange={(e) => setSessionForm(value => ({ ...value, storageState: e.target.value }))}
+              spellCheck={false}
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -838,35 +973,50 @@ export function MonitoredPages() {
       <Modal isOpen={!!editingPage} onClose={() => setEditingPage(null)} title="Edit Monitored Page" description="Update the configuration for this URL.">
         <form onSubmit={handleSubmitEdit(onEditSubmit)} className="space-y-4">
           <Input type="hidden" {...registerEdit('id')} />
-          <Input label="Title" placeholder="e.g. Stripe Pricing Page" {...registerEdit('title')} error={editErrors.title?.message} />
-          <Input label="URL" type="url" placeholder="https://example.com" {...registerEdit('url')} error={editErrors.url?.message} />
+          <Input
+            label="Title"
+            placeholder="e.g. Stripe pricing"
+            autoComplete="off"
+            maxLength={100}
+            {...registerEdit('title')}
+            error={editErrors.title?.message}
+          />
+          <Input
+            label="URL"
+            type="url"
+            placeholder="https://example.com/pricing"
+            inputMode="url"
+            autoCapitalize="none"
+            autoCorrect="off"
+            maxLength={2048}
+            {...registerEdit('url')}
+            error={editErrors.url?.message}
+          />
           
           <Select 
             label="Category" 
-            options={[
-              { label: 'General', value: 'general' },
-              { label: 'Pricing', value: 'pricing' },
-              { label: 'Policy', value: 'policy' },
-              { label: 'Product', value: 'product' },
-              { label: 'Careers', value: 'careers' },
-            ]} 
+            options={categoryOptions} 
             {...registerEdit('category')}
             error={editErrors.category?.message}
           />
 
           <Select 
             label="Importance" 
-            options={[
-              { label: 'Low', value: 'low' },
-              { label: 'Medium', value: 'medium' },
-              { label: 'High', value: 'high' },
-              { label: 'Critical', value: 'critical' },
-            ]} 
+            options={importanceOptions} 
             {...registerEdit('importance')}
             error={editErrors.importance?.message}
           />
           
-          <Input label="Check Interval (minutes)" type="number" {...registerEdit('checkInterval', { valueAsNumber: true })} error={editErrors.checkInterval?.message} />
+          <Input
+            label="Check interval (minutes)"
+            type="number"
+            min={checkIntervalLimits.min}
+            max={checkIntervalLimits.max}
+            step={5}
+            inputMode="numeric"
+            {...registerEdit('checkInterval', { valueAsNumber: true })}
+            error={editErrors.checkInterval?.message}
+          />
           
           <div className="pt-4 flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setEditingPage(null)}>Cancel</Button>

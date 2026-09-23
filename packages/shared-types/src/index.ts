@@ -27,6 +27,10 @@ export const Category = {
   PRICING: 'pricing',
   POLICY: 'policy',
   PRODUCT: 'product',
+  DOCUMENTATION: 'documentation',
+  STATUS: 'status',
+  SECURITY: 'security',
+  COMPETITOR: 'competitor',
   CAREERS: 'careers',
 } as const;
 export type Category = typeof Category[keyof typeof Category];

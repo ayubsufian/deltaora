@@ -175,6 +175,20 @@ export const loginSchema = z.object({
 const selectorSchema = z.string().min(1).max(240);
 const urlPatternSchema = z.string().min(1).max(500);
 const recipeTimeoutSchema = z.number().int().min(100).max(60000).optional();
+const httpUrlSchema = z.string()
+  .trim()
+  .min(1, 'URL is required')
+  .max(2048, 'URL is too long')
+  .url('Must be a valid URL')
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'URL must start with http:// or https://')
+  .transform((value) => new URL(value).href);
 const recipeStepSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('waitForSelector'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
   z.object({ action: z.literal('click'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
@@ -259,7 +273,7 @@ export const crawlerConfigSchema = z.object({
 }).strict();
 
 export const discoverSiteSchema = z.object({
-  url: z.string().url("Must be a valid URL"),
+  url: httpUrlSchema,
   maxDepth: z.number().int().min(0).max(5).default(1),
   maxPages: z.number().int().min(1).max(500).default(100),
   includeSubdomains: z.boolean().default(false),
@@ -270,16 +284,16 @@ export const discoverSiteSchema = z.object({
 
 export const createCrawlerAuthSessionSchema = z.object({
   name: z.string().min(1).max(100),
-  origin: z.string().url("Must be a valid origin URL"),
+  origin: httpUrlSchema.transform((value) => new URL(value).origin),
   storageState: z.record(z.unknown()),
 });
 
 export const createPageSchema = z.object({
-  url: z.string().url("Must be a valid URL"),
+  url: httpUrlSchema,
   title: z.string().min(1, "Title is required").max(100),
   category: z.enum(Object.values(Category) as [string, ...string[]]).default(Category.GENERAL),
   importance: z.enum(Object.values(Importance) as [string, ...string[]]).default(Importance.MEDIUM),
-  checkInterval: z.number().min(APP_CONFIG.MIN_CHECK_INTERVAL).max(APP_CONFIG.MAX_CHECK_INTERVAL).default(APP_CONFIG.DEFAULT_CHECK_INTERVAL),
+  checkInterval: z.number().int().min(APP_CONFIG.MIN_CHECK_INTERVAL).max(APP_CONFIG.MAX_CHECK_INTERVAL).default(APP_CONFIG.DEFAULT_CHECK_INTERVAL),
   crawlerConfig: crawlerConfigSchema.optional(),
 });
 
