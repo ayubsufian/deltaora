@@ -530,8 +530,9 @@ export function MonitoredPages() {
               className="w-full justify-between"
               onClick={() => setShowAdvancedCrawler(value => !value)}
             >
-              <span className="flex items-center gap-2"><Settings2 size={16} /> Advanced crawler</span>
-              <span>{showAdvancedCrawler ? 'Hide' : 'Show'}</span>
+              <span className="flex items-center gap-2">
+                <Settings2 size={16} /> {showAdvancedCrawler ? 'Hide advanced settings' : 'Show advanced settings'}
+              </span>
             </Button>
           </div>
 
