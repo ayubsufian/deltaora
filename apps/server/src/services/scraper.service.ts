@@ -103,7 +103,8 @@ function hashContent(content: string): string {
 async function hydrateCrawlerConfig(
   config?: ICrawlerConfig,
   crawlerAuthEncrypted?: string,
-  scrapeContext: ScrapeContext = {}
+  scrapeContext: ScrapeContext = {},
+  targetOrigin?: string
 ): Promise<InternalCrawlerConfig> {
   const hydrated: InternalCrawlerConfig = { ...(config || {}) };
 
@@ -113,7 +114,7 @@ async function hydrateCrawlerConfig(
       workspaceId: scrapeContext.workspaceId,
     }).select('+storageStateEncrypted');
 
-    if (session) {
+    if (session && (!targetOrigin || session.origin === targetOrigin)) {
       hydrated.auth = {
         ...(hydrated.auth || {}),
         storageState: JSON.parse(decryptSecret(session.storageStateEncrypted)),
@@ -614,7 +615,7 @@ export const scrapeTarget = async (
   scrapeContext: ScrapeContext = {}
 ): Promise<ScrapeResult> => {
   const targetUrl = await assertSafeScrapeUrl(rawUrl);
-  const config = await hydrateCrawlerConfig(crawlerConfig, crawlerAuthEncrypted, scrapeContext);
+  const config = await hydrateCrawlerConfig(crawlerConfig, crawlerAuthEncrypted, scrapeContext, targetUrl.origin);
   let hostDelayMs = env.CRAWLER_MIN_HOST_DELAY_MS;
 
   const shouldRespectRobots = config.compliance?.robotsPolicy === 'ignore'

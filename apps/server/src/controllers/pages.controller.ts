@@ -86,7 +86,22 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
       return res.status(409).json({ error: 'URL is already being monitored in this workspace' });
     }
 
-    await assertSafeScrapeUrl(url);
+    const targetUrl = await assertSafeScrapeUrl(url);
+
+    if (crawlerConfig?.authSessionId) {
+      const session = await CrawlerAuthSession.findOne({
+        _id: crawlerConfig.authSessionId,
+        workspaceId,
+      }).select('origin');
+
+      if (!session) {
+        return res.status(400).json({ error: 'Saved login not found in this workspace' });
+      }
+
+      if (session.origin !== targetUrl.origin) {
+        return res.status(400).json({ error: 'Saved login must use the same origin as the monitored URL' });
+      }
+    }
 
     const { publicCrawlerConfig, crawlerAuthEncrypted } = splitCrawlerConfig(crawlerConfig);
 
@@ -121,6 +136,8 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
         (await MonitoredPage.find({ workspaceId }).select('url')).map(existingPage => existingPage.url)
       );
 
+      const { authSessionId: _authSessionId, ...discoveredCrawlerConfig } = publicCrawlerConfig || {};
+
       for (const discovered of discoveredUrls) {
         if (existingUrls.has(discovered.url)) continue;
 
@@ -134,13 +151,14 @@ export const createPage = async (req: Request, res: Response, next: NextFunction
           importance,
           checkInterval,
           crawlerConfig: {
-            ...publicCrawlerConfig,
+            ...discoveredCrawlerConfig,
             discovery: {
-              ...publicCrawlerConfig.discovery,
+              ...discoveredCrawlerConfig.discovery,
               enabled: false,
             },
           },
-          crawlerAuthEncrypted,
+          // Never propagate request headers or saved-login references to discovered URLs.
+          crawlerAuthEncrypted: undefined,
           status: PageStatus.ACTIVE,
         });
         discoveredPages.push(discoveredPage);

@@ -175,6 +175,38 @@ export const loginSchema = z.object({
 const selectorSchema = z.string().min(1).max(240);
 const urlPatternSchema = z.string().min(1).max(500);
 const recipeTimeoutSchema = z.number().int().min(100).max(60000).optional();
+const disallowedCrawlerHeaderNames = new Set([
+  'host',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'upgrade',
+]);
+const headerNameSchema = z.string()
+  .min(1)
+  .max(120)
+  .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/, 'Header names must be valid HTTP tokens')
+  .refine((value) => !disallowedCrawlerHeaderNames.has(value.toLowerCase()), 'This header is controlled by the crawler');
+const headerValueSchema = z.string()
+  .max(5000)
+  .refine((value) => !/[\r\n]/.test(value), 'Header values cannot contain line breaks');
+const localeSchema = z.string()
+  .trim()
+  .min(2)
+  .max(35)
+  .refine((value) => Intl.DateTimeFormat.supportedLocalesOf([value]).length === 1, 'Use a valid BCP 47 locale, such as en-US');
+const timezoneSchema = z.string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine((value) => {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Use a valid IANA timezone, such as America/New_York');
 const httpUrlSchema = z.string()
   .trim()
   .min(1, 'URL is required')
@@ -188,7 +220,19 @@ const httpUrlSchema = z.string()
       return false;
     }
   }, 'URL must start with http:// or https://')
-  .transform((value) => new URL(value).href);
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return !parsed.username && !parsed.password;
+    } catch {
+      return false;
+    }
+  }, 'URL must not include embedded credentials')
+  .transform((value) => {
+    const parsed = new URL(value);
+    parsed.hash = '';
+    return parsed.href;
+  });
 const recipeStepSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('waitForSelector'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
   z.object({ action: z.literal('click'), selector: selectorSchema, timeoutMs: recipeTimeoutSchema }).strict(),
@@ -216,10 +260,44 @@ const crawlerCookieSchema = z.object({
 });
 
 const crawlerAuthSchema = z.object({
-  headers: z.record(z.string().min(1).max(120), z.string().max(5000)).optional(),
+  headers: z.record(headerNameSchema, headerValueSchema).optional(),
   cookies: z.array(crawlerCookieSchema).max(100).optional(),
   storageState: z.record(z.unknown()).optional(),
 }).strict();
+
+const paginationSchema = z.object({
+  nextSelector: selectorSchema.optional(),
+  nextText: z.string().min(1).max(120).optional(),
+  maxPages: z.number().int().min(1).max(50).optional(),
+  waitForSelector: selectorSchema.optional(),
+}).strict().superRefine((pagination, ctx) => {
+  const hasSelector = Boolean(pagination.nextSelector);
+  const hasText = Boolean(pagination.nextText);
+
+  if (!pagination.maxPages || pagination.maxPages <= 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['maxPages'],
+      message: 'Pagination must request at least two pages',
+    });
+  }
+
+  if (!hasSelector && !hasText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nextSelector'],
+      message: 'Provide a next-page selector or next-page text',
+    });
+  }
+
+  if (hasSelector && hasText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nextText'],
+      message: 'Use either a next-page selector or next-page text, not both',
+    });
+  }
+});
 
 export const crawlerConfigSchema = z.object({
   authSessionId: z.string().min(1).max(120).optional(),
@@ -245,15 +323,10 @@ export const crawlerConfigSchema = z.object({
     scrollToBottom: z.boolean().optional(),
     acceptCookieBanners: z.boolean().optional(),
     waitAfterLoadMs: z.number().int().min(0).max(15000).optional(),
-    locale: z.string().min(2).max(35).optional(),
-    timezoneId: z.string().min(1).max(80).optional(),
+    locale: localeSchema.optional(),
+    timezoneId: timezoneSchema.optional(),
   }).strict().optional(),
-  pagination: z.object({
-    nextSelector: selectorSchema.optional(),
-    nextText: z.string().min(1).max(120).optional(),
-    maxPages: z.number().int().min(1).max(50).optional(),
-    waitForSelector: selectorSchema.optional(),
-  }).strict().optional(),
+  pagination: paginationSchema.optional(),
   apiCapture: z.object({
     enabled: z.boolean().optional(),
     mode: z.enum(['append', 'prefer']).optional(),
@@ -283,14 +356,14 @@ export const discoverSiteSchema = z.object({
 });
 
 export const createCrawlerAuthSessionSchema = z.object({
-  name: z.string().min(1).max(100),
+  name: z.string().trim().min(1).max(100),
   origin: httpUrlSchema.transform((value) => new URL(value).origin),
   storageState: z.record(z.unknown()),
 });
 
 export const createPageSchema = z.object({
   url: httpUrlSchema,
-  title: z.string().min(1, "Title is required").max(100),
+  title: z.string().trim().min(1, "Title is required").max(100),
   category: z.enum(Object.values(Category) as [string, ...string[]]).default(Category.GENERAL),
   importance: z.enum(Object.values(Importance) as [string, ...string[]]).default(Importance.MEDIUM),
   checkInterval: z.number().int().min(APP_CONFIG.MIN_CHECK_INTERVAL).max(APP_CONFIG.MAX_CHECK_INTERVAL).default(APP_CONFIG.DEFAULT_CHECK_INTERVAL),

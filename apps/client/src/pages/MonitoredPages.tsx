@@ -10,7 +10,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Plus, Search as SearchIcon, ExternalLink, Play, Pause, Trash2, Edit2, Globe, Settings2, ShieldCheck, KeyRound } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { createPageSchema } from '@deltaora/validation';
+import { createCrawlerAuthSessionSchema, crawlerConfigSchema, createPageSchema } from '@deltaora/validation';
 import { z } from 'zod';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -107,8 +107,20 @@ const splitList = (value: string) =>
 
 const normalizeHttpUrl = (value: string) => {
   const url = new URL(value.trim());
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('URL must start with http:// or https://');
+  }
+  if (url.username || url.password) {
+    throw new Error('URL must not include embedded credentials');
+  }
+  url.hash = '';
   return url.href;
 };
+
+const compactObject = <T extends Record<string, unknown>>(value: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined)
+  ) as Partial<T>;
 
 const safeJson = (value: string, label = 'JSON') => {
   if (!value.trim()) return undefined;
@@ -118,6 +130,13 @@ const safeJson = (value: string, label = 'JSON') => {
     throw new Error(`${label} must be valid JSON`);
   }
 };
+
+const errorMessage = (error: any, fallback: string) =>
+  error.response?.data?.error ||
+  error.response?.data?.details?.[0]?.message ||
+  error.issues?.[0]?.message ||
+  error.message ||
+  fallback;
 
 export function MonitoredPages() {
   const [searchParams] = useSearchParams();
@@ -205,40 +224,49 @@ export function MonitoredPages() {
     const recipeSteps = safeJson(crawlerOptions.recipeSteps, 'Recipe steps JSON');
     const customHeaders = safeJson(crawlerOptions.customHeaders, 'Headers JSON');
 
+    if (crawlerOptions.paginationMaxPages > 1 && !crawlerOptions.paginationNextSelector.trim() && !crawlerOptions.paginationNextText.trim()) {
+      throw new Error('Provide a next-page selector or next-page text when pagination is enabled');
+    }
+
+    if (crawlerOptions.paginationNextSelector.trim() && crawlerOptions.paginationNextText.trim()) {
+      throw new Error('Use either a next-page selector or next-page text, not both');
+    }
+
     if (recipeSteps !== undefined && !Array.isArray(recipeSteps)) {
       throw new Error('Recipe steps JSON must be an array');
     }
 
-    if (customHeaders !== undefined && (typeof customHeaders !== 'object' || Array.isArray(customHeaders))) {
+    if (customHeaders !== undefined && (customHeaders === null || typeof customHeaders !== 'object' || Array.isArray(customHeaders))) {
       throw new Error('Headers JSON must be an object');
     }
 
-    return {
+    const behavior = compactObject({
+      waitForSelector: crawlerOptions.waitForSelector || undefined,
+      clickSelectors: clickSelectors.length ? clickSelectors : undefined,
+      clickText: clickText.length ? clickText : undefined,
+      steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
+      scrollToBottom: crawlerOptions.scrollToBottom ? true : undefined,
+      waitAfterLoadMs: crawlerOptions.waitAfterLoadMs > 0 ? Math.min(15000, crawlerOptions.waitAfterLoadMs) : undefined,
+      acceptCookieBanners: crawlerOptions.acceptCookieBanners === false ? false : undefined,
+      locale: crawlerOptions.locale || undefined,
+      timezoneId: crawlerOptions.timezoneId || undefined,
+    });
+
+    const config = compactObject({
       authSessionId: crawlerOptions.authSessionId || undefined,
-      respectRobots: crawlerOptions.respectRobots,
-      discovery: {
+      discovery: crawlerOptions.discoveryEnabled ? {
         enabled: crawlerOptions.discoveryEnabled,
         maxDepth: crawlerOptions.discoveryMaxDepth,
         maxPages: crawlerOptions.discoveryMaxPages,
         includeSubdomains: crawlerOptions.includeSubdomains,
         includeSitemaps: crawlerOptions.includeSitemaps,
         includeFeeds: crawlerOptions.includeFeeds,
-      },
+      } : undefined,
       extraction: includeSelectors.length || excludeSelectors.length ? {
         includeSelectors: includeSelectors.length ? includeSelectors : undefined,
         excludeSelectors: excludeSelectors.length ? excludeSelectors : undefined,
       } : undefined,
-      behavior: {
-        waitForSelector: crawlerOptions.waitForSelector || undefined,
-        clickSelectors: clickSelectors.length ? clickSelectors : undefined,
-        clickText: clickText.length ? clickText : undefined,
-        steps: Array.isArray(recipeSteps) ? recipeSteps : undefined,
-        scrollToBottom: crawlerOptions.scrollToBottom,
-        waitAfterLoadMs: crawlerOptions.waitAfterLoadMs > 0 ? Math.min(15000, crawlerOptions.waitAfterLoadMs) : undefined,
-        acceptCookieBanners: crawlerOptions.acceptCookieBanners,
-        locale: crawlerOptions.locale || undefined,
-        timezoneId: crawlerOptions.timezoneId || undefined,
-      },
+      behavior: Object.keys(behavior).length ? behavior : undefined,
       pagination: crawlerOptions.paginationMaxPages > 1 ? {
         nextSelector: crawlerOptions.paginationNextSelector || undefined,
         nextText: crawlerOptions.paginationNextText || undefined,
@@ -252,10 +280,10 @@ export function MonitoredPages() {
         includeUrlPatterns: apiIncludePatterns.length ? apiIncludePatterns : undefined,
         excludeUrlPatterns: apiExcludePatterns.length ? apiExcludePatterns : undefined,
       } : undefined,
-      content: {
-        screenshotDiff: crawlerOptions.screenshotDiff,
+      content: crawlerOptions.screenshotDiff ? {
+        screenshotDiff: true,
         binaryFingerprint: true,
-      },
+      } : undefined,
       compliance: {
         robotsPolicy: crawlerOptions.respectRobots ? 'respect' : 'ignore',
         blockedHandling: crawlerOptions.blockedHandling,
@@ -263,7 +291,9 @@ export function MonitoredPages() {
       auth: customHeaders && typeof customHeaders === 'object' && !Array.isArray(customHeaders)
         ? { headers: customHeaders }
         : undefined,
-    };
+    });
+
+    return crawlerConfigSchema.parse(config);
   };
 
   const onSubmit = async (data: CreatePageForm) => {
@@ -272,7 +302,7 @@ export function MonitoredPages() {
       toast.success('Page added successfully');
       closeAddModal();
     } catch (error: any) {
-      toast.error(error.response?.data?.error || error.message || 'Failed to add page');
+      toast.error(errorMessage(error, 'Failed to add page'));
     }
   };
 
@@ -286,7 +316,7 @@ export function MonitoredPages() {
       toast.success('Page updated successfully');
       setEditingPage(null);
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to update page');
+      toast.error(errorMessage(error, 'Failed to update page'));
     }
   };
 
@@ -316,7 +346,7 @@ export function MonitoredPages() {
       setDiscoveryPreview(result.urls);
       toast.success(`Found ${result.count} URLs`);
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Discovery failed');
+      toast.error(errorMessage(error, 'Discovery failed'));
     }
   };
 
@@ -326,16 +356,17 @@ export function MonitoredPages() {
         throw new Error('Storage state JSON is required');
       }
 
-      await createAuthSession.mutateAsync({
+      const payload = createCrawlerAuthSessionSchema.parse({
         name: sessionForm.name,
         origin: normalizeHttpUrl(sessionForm.origin),
         storageState: safeJson(sessionForm.storageState, 'Storage state JSON') as Record<string, unknown>,
       });
+      await createAuthSession.mutateAsync(payload);
       toast.success('Session saved');
       setSessionForm({ name: '', origin: '', storageState: '' });
       setIsSessionModalOpen(false);
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to save session');
+      toast.error(errorMessage(error, 'Failed to save session'));
     }
   };
 
@@ -720,14 +751,14 @@ export function MonitoredPages() {
                   {crawlerOptions.paginationMaxPages > 1 && (
                     <>
                       <Input
-                        label="Next selector"
+                        label="Next selector (or next text)"
                         value={crawlerOptions.paginationNextSelector}
                         onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextSelector: e.target.value }))}
                         placeholder="a.next"
                         maxLength={240}
                       />
                       <Input
-                        label="Next text"
+                        label="Next text (or next selector)"
                         value={crawlerOptions.paginationNextText}
                         onChange={(e) => setCrawlerOptions(value => ({ ...value, paginationNextText: e.target.value }))}
                         placeholder="Next"
