@@ -455,9 +455,9 @@ export function MonitoredPages() {
   const hasActiveFilters = Boolean(searchInput || categoryFilter || importanceFilter || statusFilter || lastCheckedFilter);
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="min-w-0 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-3xl font-bold tracking-tight">{isAllWorkspacesView ? 'All Pages' : 'Monitored Pages'}</h2>
           <p className="text-gray-500 dark:text-gray-400 mt-1">
             {isAllWorkspacesView
@@ -465,12 +465,12 @@ export function MonitoredPages() {
               : 'Manage the URLs you are tracking for changes.'}
           </p>
         </div>
-        <Button onClick={() => setIsAddModalOpen(true)}>
+        <Button className="shrink-0" onClick={() => setIsAddModalOpen(true)}>
           <Plus size={18} className="mr-2" /> Add URL
         </Button>
       </div>
 
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-xl">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -520,90 +520,98 @@ export function MonitoredPages() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm text-gray-500 dark:text-gray-400">
+          <div className="w-full overflow-x-auto overscroll-x-contain">
+            <table className="w-full min-w-[1040px] table-fixed text-left text-sm text-gray-500 dark:text-gray-400">
               <caption className="sr-only">Monitored pages</caption>
+              <colgroup>
+                <col className="w-[30%]" />
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+                <col className="w-[14%]" />
+                <col className="w-[17%]" />
+              </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-700 dark:text-gray-300">
                 <tr>
-                  <th scope="col" aria-sort={sortState('title')} className="px-6 py-3 font-medium">
+                  <th scope="col" aria-sort={sortState('title')} className="px-4 py-3 font-medium">
                     <button type="button" onClick={() => handleSort('title')} className="inline-flex items-center gap-1.5 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by page ${sortState('title') === 'ascending' ? 'descending' : 'ascending'}`}>
                       Page <span className="text-gray-400">{sortIcon('title')}</span>
                     </button>
                   </th>
-                  <th scope="col" aria-sort={sortState('category')} className="px-6 py-3 font-medium">
-                    <div className="flex items-center gap-1.5">
+                  <th scope="col" aria-sort={sortState('category')} className="px-4 py-3 font-medium">
+                    <div className="flex flex-col items-start gap-1">
                       <button type="button" onClick={() => handleSort('category')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by category ${sortState('category') === 'ascending' ? 'descending' : 'ascending'}`}>
                         Category <span className="text-gray-400">{sortIcon('category')}</span>
                       </button>
-                      <select aria-label="Filter category" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="h-7 max-w-28 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                      <select aria-label="Filter category" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="h-7 w-full rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                         <option value="">All</option>
                         {categoryOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </div>
                   </th>
-                  <th scope="col" aria-sort={sortState('importance')} className="px-6 py-3 font-medium">
-                    <div className="flex items-center gap-1.5">
+                  <th scope="col" aria-sort={sortState('importance')} className="px-4 py-3 font-medium">
+                    <div className="flex flex-col items-start gap-1">
                       <button type="button" onClick={() => handleSort('importance')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by importance ${sortState('importance') === 'ascending' ? 'descending' : 'ascending'}`}>
                         Importance <span className="text-gray-400">{sortIcon('importance')}</span>
                       </button>
-                      <select aria-label="Filter importance" value={importanceFilter} onChange={(e) => setImportanceFilter(e.target.value)} className="h-7 max-w-24 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                      <select aria-label="Filter importance" value={importanceFilter} onChange={(e) => setImportanceFilter(e.target.value)} className="h-7 w-full rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                         <option value="">All</option>
                         {importanceOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </div>
                   </th>
-                  <th scope="col" aria-sort={sortState('status')} className="px-6 py-3 font-medium">
-                    <div className="flex items-center gap-1.5">
+                  <th scope="col" aria-sort={sortState('status')} className="px-4 py-3 font-medium">
+                    <div className="flex flex-col items-start gap-1">
                       <button type="button" onClick={() => handleSort('status')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by status ${sortState('status') === 'ascending' ? 'descending' : 'ascending'}`}>
                         Status <span className="text-gray-400">{sortIcon('status')}</span>
                       </button>
-                      <select aria-label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-7 max-w-20 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                      <select aria-label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-7 w-full rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                         <option value="">All</option>
                         {statusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                       </select>
                     </div>
                   </th>
-                  <th scope="col" aria-sort={sortState('lastChecked')} className="px-6 py-3 font-medium">
-                    <div className="flex items-center gap-1.5">
+                  <th scope="col" aria-sort={sortState('lastChecked')} className="px-4 py-3 font-medium">
+                    <div className="flex flex-col items-start gap-1">
                       <button type="button" onClick={() => handleSort('lastChecked')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by last checked ${sortState('lastChecked') === 'ascending' ? 'descending' : 'ascending'}`}>
                         Last checked <span className="text-gray-400">{sortIcon('lastChecked')}</span>
                       </button>
-                      <select aria-label="Filter by last checked" value={lastCheckedFilter} onChange={(e) => setLastCheckedFilter(e.target.value)} className="h-7 max-w-28 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                      <select aria-label="Filter by last checked" value={lastCheckedFilter} onChange={(e) => setLastCheckedFilter(e.target.value)} className="h-7 w-full rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                         {lastCheckedOptions.map(option => <option key={option.value || 'any'} value={option.value}>{option.label}</option>)}
                       </select>
                     </div>
                   </th>
-                  <th className="px-6 py-4 font-medium text-right">Actions</th>
+                  <th className="px-4 py-4 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {pages.map((page) => (
                   <tr key={page._id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
+                    <td className="px-4 py-4">
+                      <div className="min-w-0">
                         <Link
                           to={`/pages/${page._id}`}
                           onClick={() => {
                             if (page.workspaceId) setActiveWorkspaceId(String(page.workspaceId));
                           }}
-                          className="font-semibold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
+                          className="block truncate font-semibold text-gray-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
                         >
                           {page.title}
                         </Link>
-                        <div className="flex items-center text-xs text-gray-500 mt-1">
-                          <a href={page.url} target="_blank" rel="noopener noreferrer" className="flex items-center hover:underline">
-                            {page.url} <ExternalLink size={10} className="ml-1" />
+                        <div className="mt-1 flex min-w-0 items-center text-xs text-gray-500">
+                          <a href={page.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center hover:underline">
+                            <span className="truncate">{page.url}</span> <ExternalLink size={10} className="ml-1 shrink-0" />
                           </a>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <Badge variant="secondary" className="capitalize">{page.category.replace(/_/g, ' ')}</Badge>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <Badge variant={importanceBadgeVariant(page.importance)} className="capitalize">{page.importance}</Badge>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-4 py-4">
                       <div className="flex flex-col items-start gap-1">
                         <Badge variant={page.status === 'active' ? 'success' : 'warning'} className="uppercase">{page.status}</Badge>
                         {page.lastCrawlStatus && (
@@ -616,33 +624,34 @@ export function MonitoredPages() {
                           </Badge>
                         )}
                         {page.lastCrawlRecommendation && (
-                          <span className="max-w-60 text-xs text-gray-500 dark:text-gray-400">
+                          <span className="max-w-36 break-words text-xs text-gray-500 dark:text-gray-400">
                             {page.lastCrawlRecommendation}
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-4 py-4 whitespace-nowrap">
                       {page.lastChecked ? formatDateRelative(new Date(page.lastChecked)) : 'Never'}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="px-4 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <Link
                           to={`/pages/${page._id}`}
                           onClick={() => {
                             if (page.workspaceId) setActiveWorkspaceId(String(page.workspaceId));
                           }}
                         >
-                          <Button variant="ghost" size="icon" title="View details">
+                          <Button variant="ghost" size="icon" className="h-9 w-9" title="View details">
                              <SearchIcon size={16} />
                           </Button>
                         </Link>
-                        <Button variant="ghost" size="icon" title="Edit URL" onClick={() => openEditModal(page)}>
+                        <Button variant="ghost" size="icon" className="h-9 w-9" title="Edit URL" onClick={() => openEditModal(page)}>
                            <Edit2 size={16} />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-9 w-9"
                           title={page.status === 'active' ? 'Pause' : 'Resume'}
                           onClick={() => handleToggleStatus(page._id, page.status)}
                         >
@@ -651,7 +660,7 @@ export function MonitoredPages() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          className="h-9 w-9 text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
                           onClick={() => handleDelete(page._id, page.title)}
                         >
                           <Trash2 size={16} />

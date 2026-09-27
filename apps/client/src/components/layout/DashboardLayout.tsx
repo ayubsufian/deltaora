@@ -49,9 +49,9 @@ export function DashboardLayout() {
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 flex overflow-hidden">
       <Sidebar isCollapsed={isSidebarCollapsed} onToggleCollapsed={toggleSidebar} />
-      <div className={`flex h-full flex-1 flex-col transition-all duration-200 ${isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
+      <div className={`flex h-full min-w-0 flex-1 flex-col transition-all duration-200 ${isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         <Header />
-        <main className="flex-1 overflow-y-auto">
+        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           {user.isEmailVerified === false && (
             <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800 p-4">
               <div className="mx-auto max-w-7xl flex items-center justify-between flex-wrap gap-4">
@@ -71,7 +71,7 @@ export function DashboardLayout() {
               </div>
             </div>
           )}
-          <div className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8 h-full">
+          <div className="mx-auto h-full w-full max-w-7xl p-4 sm:p-6 lg:p-8">
             <Outlet />
           </div>
         </main>
