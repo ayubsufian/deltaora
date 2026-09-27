@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
 import { EmptyState } from '../components/ui/EmptyState';
-import { Plus, Search as SearchIcon, ExternalLink, Play, Pause, Trash2, Edit2, Globe, Settings2, ShieldCheck, KeyRound } from 'lucide-react';
+import { Plus, Search as SearchIcon, ExternalLink, Play, Pause, Trash2, Edit2, Globe, Settings2, ShieldCheck, KeyRound, ArrowDown, ArrowUp, ArrowUpDown, X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { createCrawlerAuthSessionSchema, crawlerConfigSchema, createPageSchema } from '@deltaora/validation';
@@ -53,6 +53,22 @@ const importanceOptions = [
   { label: 'Critical', value: 'critical' },
 ];
 
+const statusOptions = [
+  { label: 'Active', value: 'active' },
+  { label: 'Paused', value: 'paused' },
+];
+
+const lastCheckedOptions = [
+  { label: 'Any time', value: '' },
+  { label: 'Past 24 hours', value: '24h' },
+  { label: 'Past 7 days', value: '7d' },
+  { label: 'Past 30 days', value: '30d' },
+  { label: 'Never checked', value: 'never' },
+];
+
+type PageSortField = 'title' | 'category' | 'importance' | 'status' | 'lastChecked';
+type PageSortDirection = 'asc' | 'desc';
+
 const checkIntervalLimits = {
   min: 5,
   default: 60,
@@ -97,6 +113,13 @@ const crawlBadgeVariant = (status?: string) => {
   if (status === 'blocked' || status === 'auth_required' || status === 'unsupported' || status === 'manual_review') return 'warning';
   if (status === 'failed') return 'destructive';
   return 'outline';
+};
+
+const importanceBadgeVariant = (importance: string) => {
+  if (importance === 'critical') return 'destructive';
+  if (importance === 'high') return 'warning';
+  if (importance === 'low') return 'outline';
+  return 'secondary';
 };
 
 const splitList = (value: string) =>
@@ -145,8 +168,13 @@ export function MonitoredPages() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [importanceFilter, setImportanceFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [lastCheckedFilter, setLastCheckedFilter] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sort, setSort] = useState<{ field: PageSortField; direction: PageSortDirection }>({
+    field: 'lastChecked',
+    direction: 'desc',
+  });
 
   const [editingPage, setEditingPage] = useState<UpdatePageForm | null>(null);
   const [showAdvancedCrawler, setShowAdvancedCrawler] = useState(false);
@@ -155,18 +183,19 @@ export function MonitoredPages() {
   const [sessionForm, setSessionForm] = useState({ name: '', origin: '', storageState: '' });
   const [crawlerOptions, setCrawlerOptions] = useState(defaultCrawlerOptions);
 
-  // Compute date bounds for filter
-  let startDate: string | undefined;
-  let endDate: string | undefined;
-  if (dateFilter) {
-    const end = new Date();
+  const lastCheckedSince = useMemo(() => {
+    if (!['24h', '7d', '30d'].includes(lastCheckedFilter)) return undefined;
     const start = new Date();
-    if (dateFilter === '24h') start.setDate(start.getDate() - 1);
-    else if (dateFilter === '7d') start.setDate(start.getDate() - 7);
-    else if (dateFilter === '30d') start.setDate(start.getDate() - 30);
-    startDate = start.toISOString();
-    endDate = end.toISOString();
-  }
+    if (lastCheckedFilter === '24h') start.setHours(start.getHours() - 24);
+    if (lastCheckedFilter === '7d') start.setDate(start.getDate() - 7);
+    if (lastCheckedFilter === '30d') start.setDate(start.getDate() - 30);
+    return start.toISOString();
+  }, [lastCheckedFilter]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
 
   const isAllWorkspacesView = searchParams.get('scope') === 'all';
   const requestedWorkspaceId = searchParams.get('workspace');
@@ -182,8 +211,10 @@ export function MonitoredPages() {
     category: categoryFilter || undefined,
     status: statusFilter || undefined,
     importance: importanceFilter || undefined,
-    startDate,
-    endDate,
+    lastCheckedSince,
+    includeNeverChecked: lastCheckedFilter === 'never',
+    sortBy: sort.field,
+    sortOrder: sort.direction,
     search: searchQuery || undefined,
   });
 
@@ -390,6 +421,39 @@ export function MonitoredPages() {
     }
   };
 
+  const handleSort = (field: PageSortField) => {
+    setSort(current => ({
+      field,
+      direction: current.field === field && current.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
+
+  const sortIcon = (field: PageSortField) => {
+    if (sort.field !== field) return <ArrowUpDown size={14} aria-hidden="true" />;
+    return sort.direction === 'asc'
+      ? <ArrowUp size={14} aria-hidden="true" />
+      : <ArrowDown size={14} aria-hidden="true" />;
+  };
+
+  const sortState = (field: PageSortField) =>
+    sort.field === field ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+
+  const clearListControls = () => {
+    setSearchInput('');
+    setSearchQuery('');
+    setCategoryFilter('');
+    setImportanceFilter('');
+    setStatusFilter('');
+    setLastCheckedFilter('');
+    setSort({ field: 'lastChecked', direction: 'desc' });
+  };
+
+  const hasListControls = Boolean(
+    searchInput || categoryFilter || importanceFilter || statusFilter || lastCheckedFilter || sort.field !== 'lastChecked' || sort.direction !== 'desc'
+  );
+
+  const hasActiveFilters = Boolean(searchInput || categoryFilter || importanceFilter || statusFilter || lastCheckedFilter);
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -407,59 +471,39 @@ export function MonitoredPages() {
       </div>
 
       <Card>
-        <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-xl">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <Input
-              className="pl-10"
-              placeholder="Search pages..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pr-10 pl-10"
+              placeholder="Search title or URL"
+              aria-label="Search monitored pages by title or URL"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
+            {searchInput && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
+                title="Clear search"
+                aria-label="Clear search"
+                onClick={() => setSearchInput('')}
+              >
+                <X size={16} />
+              </Button>
+            )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <Select 
-              options={[
-                { label: 'All Categories', value: '' },
-                ...categoryOptions,
-              ]} 
-              className="w-44"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            />
-            <Select 
-              options={[
-                { label: 'All Importance', value: '' },
-                { label: 'Critical', value: 'critical' },
-                { label: 'High', value: 'high' },
-                { label: 'Medium', value: 'medium' },
-                { label: 'Low', value: 'low' },
-              ]} 
-              className="w-36"
-              value={importanceFilter}
-              onChange={(e) => setImportanceFilter(e.target.value)}
-            />
-            <Select 
-              options={[
-                { label: 'Any Date', value: '' },
-                { label: 'Past 24 hours', value: '24h' },
-                { label: 'Past 7 days', value: '7d' },
-                { label: 'Past 30 days', value: '30d' },
-              ]} 
-              className="w-36"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-            />
-            <Select 
-              options={[
-                { label: 'All Status', value: '' },
-                { label: 'Active', value: 'active' },
-                { label: 'Paused', value: 'paused' },
-              ]} 
-              className="w-32"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            />
+          <div className="flex items-center justify-between gap-3 sm:justify-end">
+            <p className="text-sm text-gray-500 dark:text-gray-400" aria-live="polite">
+              {pages?.length ?? 0} {pages?.length === 1 ? 'page' : 'pages'}
+            </p>
+            {hasListControls && (
+              <Button type="button" variant="ghost" size="sm" onClick={clearListControls}>
+                <X size={14} className="mr-1.5" /> Clear
+              </Button>
+            )}
           </div>
         </div>
         
@@ -471,19 +515,64 @@ export function MonitoredPages() {
           <div className="py-8">
             <EmptyState
               icon={Globe}
-              title="No monitored pages"
-              description="Add your first URL to start tracking changes."
+              title={hasActiveFilters ? 'No matching pages' : 'No monitored pages'}
+              description={hasActiveFilters ? 'Change or clear the column filters and search to see more pages.' : 'Add your first URL to start tracking changes.'}
             />
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-500 dark:text-gray-400">
+            <table className="w-full min-w-[900px] text-left text-sm text-gray-500 dark:text-gray-400">
+              <caption className="sr-only">Monitored pages</caption>
               <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-700 dark:text-gray-300">
                 <tr>
-                  <th className="px-6 py-4 font-medium">Page Title / URL</th>
-                  <th className="px-6 py-4 font-medium">Category</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium">Last Checked</th>
+                  <th scope="col" aria-sort={sortState('title')} className="px-6 py-3 font-medium">
+                    <button type="button" onClick={() => handleSort('title')} className="inline-flex items-center gap-1.5 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by page ${sortState('title') === 'ascending' ? 'descending' : 'ascending'}`}>
+                      Page <span className="text-gray-400">{sortIcon('title')}</span>
+                    </button>
+                  </th>
+                  <th scope="col" aria-sort={sortState('category')} className="px-6 py-3 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => handleSort('category')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by category ${sortState('category') === 'ascending' ? 'descending' : 'ascending'}`}>
+                        Category <span className="text-gray-400">{sortIcon('category')}</span>
+                      </button>
+                      <select aria-label="Filter category" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="h-7 max-w-28 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        <option value="">All</option>
+                        {categoryOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                  </th>
+                  <th scope="col" aria-sort={sortState('importance')} className="px-6 py-3 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => handleSort('importance')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by importance ${sortState('importance') === 'ascending' ? 'descending' : 'ascending'}`}>
+                        Importance <span className="text-gray-400">{sortIcon('importance')}</span>
+                      </button>
+                      <select aria-label="Filter importance" value={importanceFilter} onChange={(e) => setImportanceFilter(e.target.value)} className="h-7 max-w-24 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        <option value="">All</option>
+                        {importanceOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                  </th>
+                  <th scope="col" aria-sort={sortState('status')} className="px-6 py-3 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => handleSort('status')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by status ${sortState('status') === 'ascending' ? 'descending' : 'ascending'}`}>
+                        Status <span className="text-gray-400">{sortIcon('status')}</span>
+                      </button>
+                      <select aria-label="Filter status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-7 max-w-20 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        <option value="">All</option>
+                        {statusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                  </th>
+                  <th scope="col" aria-sort={sortState('lastChecked')} className="px-6 py-3 font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" onClick={() => handleSort('lastChecked')} className="inline-flex items-center gap-1 rounded px-1 py-1 text-left hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:hover:text-white" aria-label={`Sort by last checked ${sortState('lastChecked') === 'ascending' ? 'descending' : 'ascending'}`}>
+                        Last checked <span className="text-gray-400">{sortIcon('lastChecked')}</span>
+                      </button>
+                      <select aria-label="Filter by last checked" value={lastCheckedFilter} onChange={(e) => setLastCheckedFilter(e.target.value)} className="h-7 max-w-28 rounded border border-gray-200 bg-white px-1.5 text-[11px] font-medium normal-case text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                        {lastCheckedOptions.map(option => <option key={option.value || 'any'} value={option.value}>{option.label}</option>)}
+                      </select>
+                    </div>
+                  </th>
                   <th className="px-6 py-4 font-medium text-right">Actions</th>
                 </tr>
               </thead>
@@ -509,10 +598,10 @@ export function MonitoredPages() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <Badge variant="secondary" className="capitalize">{page.category}</Badge>
-                      <Badge variant={page.importance === 'high' || page.importance === 'critical' ? 'warning' : 'outline'} className="capitalize mt-1 ml-1 text-[10px]">
-                        {page.importance}
-                      </Badge>
+                      <Badge variant="secondary" className="capitalize">{page.category.replace(/_/g, ' ')}</Badge>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge variant={importanceBadgeVariant(page.importance)} className="capitalize">{page.importance}</Badge>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col items-start gap-1">

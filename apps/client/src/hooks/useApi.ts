@@ -80,7 +80,17 @@ interface CrawlerAuthSession {
   updatedAt: string;
 }
 
-export function usePages(filters?: { category?: string; status?: string; importance?: string; search?: string; startDate?: string; endDate?: string; allWorkspaces?: boolean }) {
+export function usePages(filters?: {
+  category?: string;
+  status?: string;
+  importance?: string;
+  search?: string;
+  lastCheckedSince?: string;
+  includeNeverChecked?: boolean;
+  sortBy?: 'title' | 'category' | 'importance' | 'status' | 'lastChecked' | 'createdAt';
+  sortOrder?: 'asc' | 'desc';
+  allWorkspaces?: boolean;
+}) {
   const { activeWorkspaceId } = useAuth();
   const workspaceScope = filters?.allWorkspaces ? 'all' : activeWorkspaceId;
 
@@ -93,8 +103,10 @@ export function usePages(filters?: { category?: string; status?: string; importa
       if (filters?.status) params.set('status', filters.status);
       if (filters?.importance) params.set('importance', filters.importance);
       if (filters?.search) params.set('search', filters.search);
-      if (filters?.startDate) params.set('startDate', filters.startDate);
-      if (filters?.endDate) params.set('endDate', filters.endDate);
+      if (filters?.lastCheckedSince) params.set('lastCheckedSince', filters.lastCheckedSince);
+      if (filters?.includeNeverChecked) params.set('includeNeverChecked', 'true');
+      if (filters?.sortBy) params.set('sortBy', filters.sortBy);
+      if (filters?.sortOrder) params.set('sortOrder', filters.sortOrder);
       const { data } = await api.get(`/pages?${params.toString()}`, workspaceRequest(activeWorkspaceId));
       return data as MonitoredPage[];
     },

@@ -30,7 +30,17 @@ const splitCrawlerConfig = (crawlerConfig: any) => {
 export const getPages = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const workspaceId = req.workspaceId;
-    const { category, status, importance, search, startDate, endDate, allWorkspaces } = req.query;
+    const {
+      category,
+      status,
+      importance,
+      search,
+      lastCheckedSince,
+      includeNeverChecked,
+      sortBy,
+      sortOrder,
+      allWorkspaces,
+    } = req.query;
 
     if (!workspaceId && allWorkspaces !== 'true') {
       return res.status(400).json({ error: 'No workspace context. Please select a workspace.' });
@@ -52,13 +62,32 @@ export const getPages = async (req: Request, res: Response, next: NextFunction) 
     if (importance) query.importance = importance;
     if (search) query.title = { $regex: escapeRegex(search as string), $options: 'i' };
     
-    if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate as string);
-      if (endDate) query.createdAt.$lte = new Date(endDate as string);
+    if (includeNeverChecked === 'true') {
+      query.lastChecked = null;
+    } else if (lastCheckedSince) {
+      const since = new Date(lastCheckedSince as string);
+      if (!Number.isNaN(since.getTime())) {
+        query.lastChecked = { $gte: since };
+      }
     }
 
-    const pages = await MonitoredPage.find(query).sort({ createdAt: -1 });
+    const sortableFields = new Set(['title', 'category', 'importance', 'status', 'lastChecked', 'createdAt']);
+    const field = typeof sortBy === 'string' && sortableFields.has(sortBy) ? sortBy : 'lastChecked';
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const pages = field === 'importance'
+      ? await MonitoredPage.aggregate([
+          { $match: query },
+          {
+            $addFields: {
+              importanceRank: {
+                $indexOfArray: [['low', 'medium', 'high', 'critical'], '$importance'],
+              },
+            },
+          },
+          { $sort: { importanceRank: direction, _id: direction } },
+          { $project: { importanceRank: 0 } },
+        ])
+      : await MonitoredPage.find(query).sort({ [field]: direction, _id: direction });
     res.json(pages);
   } catch (error: unknown) {
     if (error instanceof ForbiddenError) {
