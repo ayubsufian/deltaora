@@ -1,12 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/axios';
+import { useAuth } from '../contexts/AuthContext';
+
+const workspaceRequest = (workspaceId: string | null) => workspaceId
+  ? { headers: { 'x-workspace-id': workspaceId } }
+  : undefined;
 
 // ── Dashboard ──
 export function useDashboardStats() {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', activeWorkspaceId],
     queryFn: async () => {
-      const { data } = await api.get('/dashboard');
+      const { data } = await api.get('/dashboard', workspaceRequest(activeWorkspaceId));
       return data as {
         totalPages: number;
         checkedToday: number;
@@ -22,19 +28,22 @@ export function useDashboardStats() {
         }>;
       };
     },
+    enabled: Boolean(activeWorkspaceId),
   });
 }
 
 export function useTimeseriesStats() {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['stats', 'timeseries'],
+    queryKey: ['stats', 'timeseries', activeWorkspaceId],
     queryFn: async () => {
-      const { data } = await api.get('/stats/timeseries');
+      const { data } = await api.get('/stats/timeseries', workspaceRequest(activeWorkspaceId));
       return data as {
         weekly: Array<{ name: string; changes: number }>;
         monthly: Array<{ name: string; changes: number; summaries: number }>;
       };
     },
+    enabled: Boolean(activeWorkspaceId),
   });
 }
 
@@ -72,8 +81,11 @@ interface CrawlerAuthSession {
 }
 
 export function usePages(filters?: { category?: string; status?: string; importance?: string; search?: string; startDate?: string; endDate?: string; allWorkspaces?: boolean }) {
+  const { activeWorkspaceId } = useAuth();
+  const workspaceScope = filters?.allWorkspaces ? 'all' : activeWorkspaceId;
+
   return useQuery({
-    queryKey: ['pages', filters],
+    queryKey: ['pages', workspaceScope, filters],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters?.allWorkspaces) params.set('allWorkspaces', 'true');
@@ -83,21 +95,23 @@ export function usePages(filters?: { category?: string; status?: string; importa
       if (filters?.search) params.set('search', filters.search);
       if (filters?.startDate) params.set('startDate', filters.startDate);
       if (filters?.endDate) params.set('endDate', filters.endDate);
-      const { data } = await api.get(`/pages?${params.toString()}`);
+      const { data } = await api.get(`/pages?${params.toString()}`, workspaceRequest(activeWorkspaceId));
       return data as MonitoredPage[];
     },
+    enabled: filters?.allWorkspaces || Boolean(activeWorkspaceId),
   });
 }
 
 export function useCreatePage() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (body: { title: string;  url: string;
   category: string;
   importance: string;
   checkInterval: number;
   crawlerConfig?: any; }) => {
-      const { data } = await api.post('/pages', body);
+      const { data } = await api.post('/pages', body, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
@@ -108,6 +122,7 @@ export function useCreatePage() {
 }
 
 export function useDiscoverSite() {
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (body: {
       url: string;
@@ -118,7 +133,7 @@ export function useDiscoverSite() {
       includeFeeds?: boolean;
       respectRobots?: boolean;
     }) => {
-      const { data } = await api.post('/pages/discover', body);
+      const { data } = await api.post('/pages/discover', body, workspaceRequest(activeWorkspaceId));
       return data as {
         count: number;
         urls: Array<{ url: string; depth: number; source: string }>;
@@ -128,20 +143,23 @@ export function useDiscoverSite() {
 }
 
 export function useCrawlerAuthSessions() {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['crawler-auth-sessions'],
+    queryKey: ['crawler-auth-sessions', activeWorkspaceId],
     queryFn: async () => {
-      const { data } = await api.get('/pages/auth-sessions');
+      const { data } = await api.get('/pages/auth-sessions', workspaceRequest(activeWorkspaceId));
       return data as CrawlerAuthSession[];
     },
+    enabled: Boolean(activeWorkspaceId),
   });
 }
 
 export function useCreateCrawlerAuthSession() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (body: { name: string; origin: string; storageState: Record<string, unknown> }) => {
-      const { data } = await api.post('/pages/auth-sessions', body);
+      const { data } = await api.post('/pages/auth-sessions', body, workspaceRequest(activeWorkspaceId));
       return data as CrawlerAuthSession;
     },
     onSuccess: () => {
@@ -152,9 +170,10 @@ export function useCreateCrawlerAuthSession() {
 
 export function useDeleteCrawlerAuthSession() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await api.delete(`/pages/auth-sessions/${id}`);
+      const { data } = await api.delete(`/pages/auth-sessions/${id}`, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
@@ -165,9 +184,10 @@ export function useDeleteCrawlerAuthSession() {
 
 export function useUpdatePage() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<MonitoredPage> }) => {
-      const res = await api.put(`/pages/${id}`, data);
+      const res = await api.put(`/pages/${id}`, data, workspaceRequest(activeWorkspaceId));
       return res.data;
     },
     onSuccess: () => {
@@ -179,9 +199,10 @@ export function useUpdatePage() {
 
 export function useDeletePage() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await api.delete(`/pages/${id}`);
+      const { data } = await api.delete(`/pages/${id}`, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
@@ -193,9 +214,10 @@ export function useDeletePage() {
 
 export function useTogglePageStatus() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { data } = await api.patch(`/pages/${id}/status`, { status });
+      const { data } = await api.patch(`/pages/${id}/status`, { status }, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
@@ -206,66 +228,71 @@ export function useTogglePageStatus() {
 
 // ── Page Detail ──
 export function usePageDetail(id: string) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['page', id],
+    queryKey: ['page', activeWorkspaceId, id],
     queryFn: async () => {
-      const { data } = await api.get(`/pages/${id}`);
+      const { data } = await api.get(`/pages/${id}`, workspaceRequest(activeWorkspaceId));
       return data as {
         page: MonitoredPage;
         latestSnapshot: { _id: string; content: string; contentHash: string; createdAt: string } | null;
         latestDiff: { _id: string; oldContent: string; newContent: string; diffText: string; createdAt: string } | null;
       };
     },
-    enabled: !!id,
+    enabled: Boolean(id && activeWorkspaceId),
   });
 }
 
 // ── History ──
 export function usePageSnapshots(pageId: string) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['snapshots', pageId],
+    queryKey: ['snapshots', activeWorkspaceId, pageId],
     queryFn: async () => {
-      const { data } = await api.get(`/pages/${pageId}/snapshots`);
+      const { data } = await api.get(`/pages/${pageId}/snapshots`, workspaceRequest(activeWorkspaceId));
       return data as Array<{ _id: string; content: string; contentHash: string; createdAt: string }>;
     },
-    enabled: !!pageId,
+    enabled: Boolean(pageId && activeWorkspaceId),
   });
 }
 
 export function usePageDiffs(pageId: string) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['diffs', pageId],
+    queryKey: ['diffs', activeWorkspaceId, pageId],
     queryFn: async () => {
-      const { data } = await api.get(`/pages/${pageId}/diffs`);
+      const { data } = await api.get(`/pages/${pageId}/diffs`, workspaceRequest(activeWorkspaceId));
       return data as Array<{ _id: string; oldContent: string; newContent: string; diffText: string; createdAt: string }>;
     },
-    enabled: !!pageId,
+    enabled: Boolean(pageId && activeWorkspaceId),
   });
 }
 
 export function usePageSummaries(pageId: string) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['summaries', pageId],
+    queryKey: ['summaries', activeWorkspaceId, pageId],
     queryFn: async () => {
-      const { data } = await api.get(`/pages/${pageId}/summaries`);
+      const { data } = await api.get(`/pages/${pageId}/summaries`, workspaceRequest(activeWorkspaceId));
       return data as Array<{ _id: string; summary: string; createdAt: string }>;
     },
-    enabled: !!pageId,
+    enabled: Boolean(pageId && activeWorkspaceId),
   });
 }
 
 // ── Search ──
 export function useSearch(query: string) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['search', query],
+    queryKey: ['search', activeWorkspaceId, query],
     queryFn: async () => {
-      const { data } = await api.get(`/search?q=${encodeURIComponent(query)}`);
+      const { data } = await api.get(`/search?q=${encodeURIComponent(query)}`, workspaceRequest(activeWorkspaceId));
       return data as {
         urls: MonitoredPage[];
         summaries: Array<{ _id: string; summary: string; diffId: string; createdAt: string }>;
       };
     },
-    enabled: query.length > 0,
+    enabled: Boolean(activeWorkspaceId && query.length > 0),
   });
 }
 
@@ -280,23 +307,26 @@ interface NotificationItem {
 }
 
 export function useNotifications(page = 1, limit = 20) {
+  const { activeWorkspaceId } = useAuth();
   return useQuery({
-    queryKey: ['notifications', page, limit],
+    queryKey: ['notifications', activeWorkspaceId, page, limit],
     queryFn: async () => {
-      const { data } = await api.get(`/notifications?page=${page}&limit=${limit}`);
+      const { data } = await api.get(`/notifications?page=${page}&limit=${limit}`, workspaceRequest(activeWorkspaceId));
       return data as {
         data: NotificationItem[];
         meta: { total: number; page: number; limit: number; totalPages: number };
       };
     },
+    enabled: Boolean(activeWorkspaceId),
   });
 }
 
 export function useMarkNotificationRead() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await api.patch(`/notifications/${id}/read`);
+      const { data } = await api.patch(`/notifications/${id}/read`, undefined, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
@@ -308,9 +338,10 @@ export function useMarkNotificationRead() {
 
 export function useMarkAllNotificationsRead() {
   const qc = useQueryClient();
+  const { activeWorkspaceId } = useAuth();
   return useMutation({
     mutationFn: async () => {
-      const { data } = await api.patch('/notifications/read-all');
+      const { data } = await api.patch('/notifications/read-all', undefined, workspaceRequest(activeWorkspaceId));
       return data;
     },
     onSuccess: () => {
