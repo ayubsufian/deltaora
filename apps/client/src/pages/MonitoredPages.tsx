@@ -26,6 +26,8 @@ import {
 import { formatDateRelative } from '@deltaora/shared-utils';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
+import api from '../lib/axios';
 
 const updatePageSchema = createPageSchema.extend({
   id: z.string(),
@@ -68,6 +70,7 @@ const lastCheckedOptions = [
 
 type PageSortField = 'title' | 'category' | 'importance' | 'status' | 'lastChecked';
 type PageSortDirection = 'asc' | 'desc';
+type StepUpMethod = 'password' | 'mfa' | 'google';
 
 const checkIntervalLimits = {
   min: 5,
@@ -161,9 +164,12 @@ const errorMessage = (error: any, fallback: string) =>
   error.message ||
   fallback;
 
+const requiresStepUp = (error: any) =>
+  ['STEP_UP_REQUIRED', 'MFA_STEP_UP_REQUIRED'].includes(error.response?.data?.code);
+
 export function MonitoredPages() {
   const [searchParams] = useSearchParams();
-  const { activeWorkspaceId, setActiveWorkspaceId } = useAuth();
+  const { activeWorkspaceId, setActiveWorkspaceId, user } = useAuth();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -179,6 +185,11 @@ export function MonitoredPages() {
   const [editingPage, setEditingPage] = useState<UpdatePageForm | null>(null);
   const [showAdvancedCrawler, setShowAdvancedCrawler] = useState(false);
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
+  const [isSaveLoginStepUpOpen, setIsSaveLoginStepUpOpen] = useState(false);
+  const [saveLoginStepUpValue, setSaveLoginStepUpValue] = useState('');
+  const [saveLoginStepUpError, setSaveLoginStepUpError] = useState('');
+  const [isVerifyingSaveLogin, setIsVerifyingSaveLogin] = useState(false);
+  const [sessionFormError, setSessionFormError] = useState('');
   const [discoveryPreview, setDiscoveryPreview] = useState<Array<{ url: string; depth: number; source: string }>>([]);
   const [sessionForm, setSessionForm] = useState({ name: '', origin: '', storageState: '' });
   const [crawlerOptions, setCrawlerOptions] = useState(defaultCrawlerOptions);
@@ -225,6 +236,14 @@ export function MonitoredPages() {
   const discoverSite = useDiscoverSite();
   const { data: authSessions } = useCrawlerAuthSessions();
   const createAuthSession = useCreateCrawlerAuthSession();
+
+  const saveLoginStepUpMethod: StepUpMethod | null = user?.mfaEnabled
+    ? 'mfa'
+    : user?.authMethods?.password
+      ? 'password'
+      : user?.authMethods?.google
+        ? 'google'
+        : null;
 
   const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<CreatePageForm>({
     resolver: zodResolver(createPageSchema),
@@ -381,7 +400,14 @@ export function MonitoredPages() {
     }
   };
 
-  const handleCreateSession = async () => {
+  const closeSaveLoginStepUp = (force = false) => {
+    if (isVerifyingSaveLogin && !force) return;
+    setIsSaveLoginStepUpOpen(false);
+    setSaveLoginStepUpValue('');
+    setSaveLoginStepUpError('');
+  };
+
+  const saveCrawlerAuthSession = async () => {
     try {
       if (!sessionForm.storageState.trim()) {
         throw new Error('Storage state JSON is required');
@@ -392,12 +418,61 @@ export function MonitoredPages() {
         origin: normalizeHttpUrl(sessionForm.origin),
         storageState: safeJson(sessionForm.storageState, 'Storage state JSON') as Record<string, unknown>,
       });
-      await createAuthSession.mutateAsync(payload);
-      toast.success('Session saved');
+      const savedSession = await createAuthSession.mutateAsync(payload);
+      setCrawlerOptions(value => ({ ...value, authSessionId: savedSession._id }));
+      toast.success('Saved login added and selected');
       setSessionForm({ name: '', origin: '', storageState: '' });
+      setSessionFormError('');
       setIsSessionModalOpen(false);
     } catch (error: any) {
-      toast.error(errorMessage(error, 'Failed to save session'));
+      if (requiresStepUp(error)) {
+        if (!saveLoginStepUpMethod) {
+          setSessionFormError('Add a password, Google sign-in, or multi-factor authentication before saving a login.');
+          return;
+        }
+        setSaveLoginStepUpValue('');
+        setSaveLoginStepUpError('');
+        setIsSaveLoginStepUpOpen(true);
+        return;
+      }
+      setSessionFormError(errorMessage(error, 'Could not save this login. Review the details and try again.'));
+    }
+  };
+
+  const submitSaveLoginStepUp = async () => {
+    if (!saveLoginStepUpMethod || (saveLoginStepUpMethod !== 'google' && !saveLoginStepUpValue.trim())) return;
+
+    setIsVerifyingSaveLogin(true);
+    setSaveLoginStepUpError('');
+    try {
+      await api.post('/auth/step-up', saveLoginStepUpMethod === 'mfa'
+        ? { mfaCode: saveLoginStepUpValue.trim() }
+        : { currentPassword: saveLoginStepUpValue });
+      closeSaveLoginStepUp(true);
+      await saveCrawlerAuthSession();
+    } catch (error: any) {
+      setSaveLoginStepUpError(errorMessage(error, 'Verification failed. Try again.'));
+    } finally {
+      setIsVerifyingSaveLogin(false);
+    }
+  };
+
+  const submitGoogleSaveLoginStepUp = async (credential?: string) => {
+    if (!credential) {
+      setSaveLoginStepUpError('Google verification did not complete. Try again.');
+      return;
+    }
+
+    setIsVerifyingSaveLogin(true);
+    setSaveLoginStepUpError('');
+    try {
+      await api.post('/auth/step-up', { googleToken: credential });
+      closeSaveLoginStepUp(true);
+      await saveCrawlerAuthSession();
+    } catch (error: any) {
+      setSaveLoginStepUpError(errorMessage(error, 'Google verification failed. Try again.'));
+    } finally {
+      setIsVerifyingSaveLogin(false);
     }
   };
 
@@ -750,7 +825,15 @@ export function MonitoredPages() {
                     onChange={(e) => setCrawlerOptions(value => ({ ...value, authSessionId: e.target.value }))}
                   />
                   <div className="flex items-end">
-                    <Button type="button" variant="secondary" className="w-full" onClick={() => setIsSessionModalOpen(true)}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setSessionFormError('');
+                        setIsSessionModalOpen(true);
+                      }}
+                    >
                       <KeyRound size={16} className="mr-2" /> Add login
                     </Button>
                   </div>
@@ -1060,12 +1143,20 @@ export function MonitoredPages() {
         </form>
       </Modal>
 
-      <Modal isOpen={isSessionModalOpen} onClose={() => setIsSessionModalOpen(false)} title="Add Saved Login">
+      <Modal
+        isOpen={isSessionModalOpen}
+        onClose={() => !createAuthSession.isPending && setIsSessionModalOpen(false)}
+        title="Add Saved Login"
+        description="Your browser state is encrypted before storage. Verify your identity before this sensitive login is saved."
+      >
         <div className="space-y-4">
           <Input
             label="Name"
             value={sessionForm.name}
-            onChange={(e) => setSessionForm(value => ({ ...value, name: e.target.value }))}
+            onChange={(e) => {
+              setSessionForm(value => ({ ...value, name: e.target.value }));
+              setSessionFormError('');
+            }}
             placeholder="Vendor dashboard"
             maxLength={100}
           />
@@ -1073,7 +1164,10 @@ export function MonitoredPages() {
             label="Origin"
             type="url"
             value={sessionForm.origin}
-            onChange={(e) => setSessionForm(value => ({ ...value, origin: e.target.value }))}
+            onChange={(e) => {
+              setSessionForm(value => ({ ...value, origin: e.target.value }));
+              setSessionFormError('');
+            }}
             placeholder="https://example.com"
             inputMode="url"
             autoCapitalize="none"
@@ -1088,13 +1182,73 @@ export function MonitoredPages() {
               id="crawler-storage-state-json"
               className="min-h-40 w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
               value={sessionForm.storageState}
-              onChange={(e) => setSessionForm(value => ({ ...value, storageState: e.target.value }))}
+              onChange={(e) => {
+                setSessionForm(value => ({ ...value, storageState: e.target.value }));
+                setSessionFormError('');
+              }}
               spellCheck={false}
             />
           </div>
+          {sessionFormError && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">{sessionFormError}</p>
+          )}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setIsSessionModalOpen(false)}>Cancel</Button>
-            <Button type="button" onClick={handleCreateSession} isLoading={createAuthSession.isPending}>Save login</Button>
+            <Button type="button" variant="ghost" onClick={() => setIsSessionModalOpen(false)} disabled={createAuthSession.isPending}>Cancel</Button>
+            <Button type="button" onClick={saveCrawlerAuthSession} isLoading={createAuthSession.isPending}>Save login</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isSaveLoginStepUpOpen}
+        onClose={closeSaveLoginStepUp}
+        title="Verify it is you"
+        description="Saved logins can grant access to third-party accounts. Confirm your identity to continue."
+      >
+        <div className="space-y-4">
+          {saveLoginStepUpMethod === 'google' ? (
+            <>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Continue with the Google account connected to this Deltaora account.
+              </p>
+              <div className={isVerifyingSaveLogin ? 'pointer-events-none opacity-60' : ''}>
+                <GoogleLogin
+                  onSuccess={credentialResponse => submitGoogleSaveLoginStepUp(credentialResponse.credential)}
+                  onError={() => setSaveLoginStepUpError('Google verification did not complete. Try again.')}
+                  theme="filled_blue"
+                  shape="rectangular"
+                  width="100%"
+                  context="use"
+                  ux_mode="popup"
+                />
+              </div>
+            </>
+          ) : (
+            <Input
+              autoFocus
+              label={saveLoginStepUpMethod === 'mfa' ? 'Authentication code' : 'Current password'}
+              type={saveLoginStepUpMethod === 'mfa' ? 'text' : 'password'}
+              inputMode={saveLoginStepUpMethod === 'mfa' ? 'numeric' : undefined}
+              autoComplete={saveLoginStepUpMethod === 'mfa' ? 'one-time-code' : 'current-password'}
+              value={saveLoginStepUpValue}
+              onChange={event => {
+                setSaveLoginStepUpValue(event.target.value);
+                setSaveLoginStepUpError('');
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') submitSaveLoginStepUp();
+              }}
+              error={saveLoginStepUpError || undefined}
+            />
+          )}
+          {saveLoginStepUpMethod === 'google' && saveLoginStepUpError && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">{saveLoginStepUpError}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => closeSaveLoginStepUp()} disabled={isVerifyingSaveLogin}>Cancel</Button>
+            {saveLoginStepUpMethod !== 'google' && (
+              <Button onClick={submitSaveLoginStepUp} isLoading={isVerifyingSaveLogin}>Continue</Button>
+            )}
           </div>
         </div>
       </Modal>
