@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { MonitoredPage } from '../models/MonitoredPage';
 import { Job as JobModel } from '../models/Job';
 import { PageStatus, JobStatus } from '@deltaora/shared-types';
+import { createCrawlQueueJobId } from './jobIds';
 
 export const crawlQueue = new Queue('crawlQueue', {
   connection: { url: env.REDIS_URL }
@@ -39,16 +40,31 @@ export const startScheduler = () => {
               status: JobStatus.PENDING,
             });
 
-            await crawlQueue.add(
-              'crawl',
-              { pageId: page.id, jobId: jobRecord.id },
-              {
-                jobId: `crawl:${page.id}`,
-                attempts: 1,
-                removeOnComplete: true,
-                removeOnFail: { age: 7 * 24 * 60 * 60 },
-              }
-            );
+            try {
+              await crawlQueue.add(
+                'crawl',
+                { pageId: page.id, jobId: jobRecord.id },
+                {
+                  // BullMQ reserves ':' for Redis key segments. Tie the queue ID to
+                  // this execution record (not the page) so retained failed jobs do
+                  // not suppress later scheduled crawls for the same page.
+                  jobId: createCrawlQueueJobId(jobRecord.id),
+                  attempts: 1,
+                  removeOnComplete: true,
+                  removeOnFail: { age: 7 * 24 * 60 * 60 },
+                }
+              );
+            } catch (error) {
+              // Do not leave an unqueueable job marked pending: it would block this
+              // page from being scheduled again. Preserve the failure for auditability.
+              const message = error instanceof Error ? error.message : String(error);
+              await JobModel.findByIdAndUpdate(jobRecord.id, {
+                status: JobStatus.FAILED,
+                completedAt: new Date(),
+                error: `Failed to enqueue crawl: ${message}`,
+              });
+              console.error(`Failed to enqueue crawl for page ${page.id}:`, error);
+            }
           }
         }
       }
