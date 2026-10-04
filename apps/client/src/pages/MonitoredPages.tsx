@@ -113,7 +113,7 @@ const defaultCrawlerOptions = {
 
 const crawlBadgeVariant = (status?: string) => {
   if (status === 'success') return 'success';
-  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported' || status === 'manual_review') return 'warning';
+  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported' || status === 'manual_review' || status === 'rate_limited') return 'warning';
   if (status === 'failed') return 'destructive';
   return 'outline';
 };

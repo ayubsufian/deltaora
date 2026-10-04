@@ -7,6 +7,7 @@ export type PageStatus = typeof PageStatus[keyof typeof PageStatus];
 export const CrawlStatus = {
   SUCCESS: 'success',
   FAILED: 'failed',
+  RATE_LIMITED: 'rate_limited',
   BLOCKED: 'blocked',
   UNSUPPORTED: 'unsupported',
   AUTH_REQUIRED: 'auth_required',

@@ -49,7 +49,11 @@ export const startScheduler = () => {
                   // this execution record (not the page) so retained failed jobs do
                   // not suppress later scheduled crawls for the same page.
                   jobId: createCrawlQueueJobId(jobRecord.id),
-                  attempts: 1,
+                  // Retriable HTTP failures use the worker's custom policy. It
+                  // honors Retry-After for 429 responses and rejects retries for
+                  // permanent 4xx errors.
+                  attempts: 4,
+                  backoff: { type: 'crawl-http' },
                   removeOnComplete: true,
                   removeOnFail: { age: 7 * 24 * 60 * 60 },
                 }

@@ -5,6 +5,7 @@ import { Snapshot } from '../models/Snapshot';
 import { Diff } from '../models/Diff';
 import { Job as JobModel } from '../models/Job';
 import { CrawlError, scrapeTarget } from '../services/scraper.service';
+import { getCrawlRetryDelay, redactUrlForLogs, RetryableCrawlError } from '../services/crawlRetry.service';
 import { generateDiff } from '../services/diff.service';
 import { CrawlStatus, JobStatus } from '@deltaora/shared-types';
 
@@ -62,7 +63,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       lastCrawlCode: undefined,
       lastHttpStatus: scrape.httpStatus,
       lastContentType: scrape.contentType,
-      lastResolvedUrl: scrape.finalUrl,
+      lastResolvedUrl: redactUrlForLogs(scrape.finalUrl),
       lastCrawlRecommendation: undefined,
     });
     await JobModel.findByIdAndUpdate(dbJobId, { status: JobStatus.COMPLETED, completedAt: new Date() });
@@ -71,6 +72,7 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
     const err = error as Error & { code?: string; statusCode?: number; crawlStatus?: CrawlStatus };
     const baseCrawlStatus =
       err instanceof CrawlError ? err.crawlStatus :
+      err.statusCode === 429 ? CrawlStatus.RATE_LIMITED :
       err.statusCode === 403 ? CrawlStatus.BLOCKED :
       err.statusCode === 415 ? CrawlStatus.UNSUPPORTED :
       err.statusCode === 401 ? CrawlStatus.AUTH_REQUIRED :
@@ -80,14 +82,20 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       baseCrawlStatus === CrawlStatus.BLOCKED &&
       page?.crawlerConfig?.compliance?.blockedHandling === 'manual_review';
     const crawlStatus = shouldManualReview ? CrawlStatus.MANUAL_REVIEW : baseCrawlStatus;
+    const retryDelay = getCrawlRetryDelay(job.attemptsMade + 1, err as RetryableCrawlError);
+    const willRetry = retryDelay >= 0 && job.attemptsMade + 1 < (job.opts.attempts ?? 1);
     const recommendation =
       crawlStatus === CrawlStatus.MANUAL_REVIEW
         ? 'Review the site manually or use an authorized data source; Deltaora detected an access block and will not bypass anti-bot controls.'
         : crawlStatus === CrawlStatus.AUTH_REQUIRED
           ? 'Connect a recorded auth session or provide authorized cookies/storage state for this workspace.'
           : crawlStatus === CrawlStatus.UNSUPPORTED
-            ? 'Enable binary fingerprinting or add a supported extractor for this content type.'
-            : err.code === 'robots_disallowed'
+          ? 'Enable binary fingerprinting or add a supported extractor for this content type.'
+          : crawlStatus === CrawlStatus.RATE_LIMITED
+            ? willRetry
+              ? 'The target rate-limited this crawl. Deltaora will retry automatically after the requested backoff.'
+              : 'The target rate-limited this crawl repeatedly. Check the provider quota and try again after its rate limit resets.'
+          : err.code === 'robots_disallowed'
               ? 'Robots policy prevents crawling this URL. Keep robots enabled for public sites or use an approved enterprise allowlist for owned/internal sites.'
               : undefined;
 
@@ -99,19 +107,35 @@ export const crawlWorker = new Worker('crawlQueue', async job => {
       lastHttpStatus: err.statusCode,
       lastCrawlRecommendation: recommendation,
     });
-    await JobModel.findByIdAndUpdate(dbJobId, {
-      status: JobStatus.FAILED,
-      completedAt: new Date(),
-      error: err.message,
-    });
+    await JobModel.findByIdAndUpdate(
+      dbJobId,
+      willRetry
+        ? { status: JobStatus.PENDING, error: err.message }
+        : { status: JobStatus.FAILED, completedAt: new Date(), error: err.message }
+    );
     throw error;
   }
 }, {
   connection: { url: env.REDIS_URL },
   concurrency: 5,
   limiter: { max: 30, duration: 60_000 },
+  settings: {
+    backoffStrategy: (attemptsMade, type, error) =>
+      type === 'crawl-http' && error
+        ? getCrawlRetryDelay(attemptsMade, error as RetryableCrawlError)
+        : -1,
+  },
 });
 
 crawlWorker.on('failed', (job, err) => {
-  console.error(`Crawl job ${job?.id} failed with error:`, err);
+  const safeMessage = err instanceof Error ? err.message.replace(/https?:\/\/\S+/g, redactUrlForLogs) : String(err);
+  const retryDelay = getCrawlRetryDelay(job?.attemptsMade ?? 1, err as RetryableCrawlError);
+  const willRetry = retryDelay >= 0 && (job?.attemptsMade ?? 1) < (job?.opts.attempts ?? 1);
+
+  if (willRetry) {
+    console.warn(`Crawl job ${job?.id} is retrying after a transient failure: ${safeMessage}`);
+    return;
+  }
+
+  console.error(`Crawl job ${job?.id} failed permanently: ${safeMessage}`);
 });

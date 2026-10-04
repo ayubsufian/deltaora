@@ -8,6 +8,7 @@ import { fetchBufferSafely } from './safeHttp.service';
 import { assertSafeScrapeUrl } from './urlSafety.service';
 import { extractCleanText, extractFromBuffer } from './extractor.service';
 import { CrawlerAuthSession } from '../models/CrawlerAuthSession';
+import { parseRetryAfter, redactUrlForLogs } from './crawlRetry.service';
 
 let browserInstance: Browser | null = null;
 const hostLastStartedAt = new Map<string, number>();
@@ -16,13 +17,15 @@ export class CrawlError extends Error {
   code: string;
   statusCode: number;
   crawlStatus: CrawlStatus;
+  retryAfterMs?: number;
 
-  constructor(message: string, code: string, crawlStatus: CrawlStatus, statusCode = 500) {
+  constructor(message: string, code: string, crawlStatus: CrawlStatus, statusCode = 500, retryAfterMs?: number) {
     super(message);
     this.name = 'CrawlError';
     this.code = code;
     this.crawlStatus = crawlStatus;
     this.statusCode = statusCode;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -161,13 +164,25 @@ function isLikelyHtml(contentType: string, url: string) {
   return !DOCUMENT_EXTENSIONS.some(extension => pathname.endsWith(extension));
 }
 
-function assertSuccessfulHttpStatus(status: number, url: string) {
+function assertSuccessfulHttpStatus(status: number, url: string, retryAfter?: string | null) {
+  const safeUrl = redactUrlForLogs(url);
+
+  if (status === 429) {
+    throw new CrawlError(
+      `Target rate-limited this crawl for ${safeUrl}`,
+      'rate_limited',
+      CrawlStatus.RATE_LIMITED,
+      status,
+      parseRetryAfter(retryAfter)
+    );
+  }
+
   if (status === 401 || status === 403) {
-    throw new CrawlError(`Authentication or permission is required for ${url}`, 'auth_required', CrawlStatus.AUTH_REQUIRED, status);
+    throw new CrawlError(`Authentication or permission is required for ${safeUrl}`, 'auth_required', CrawlStatus.AUTH_REQUIRED, status);
   }
 
   if (status >= 400) {
-    throw new CrawlError(`Target returned HTTP ${status} for ${url}`, 'bad_http_status', CrawlStatus.FAILED, status);
+    throw new CrawlError(`Target returned HTTP ${status} for ${safeUrl}`, 'bad_http_status', CrawlStatus.FAILED, status);
   }
 }
 
@@ -522,7 +537,7 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
     });
 
     if (!response) {
-      throw new CrawlError(`Target did not return a document response for ${targetUrl}`, 'no_document_response', CrawlStatus.FAILED);
+      throw new CrawlError(`Target did not return a document response for ${redactUrlForLogs(targetUrl)}`, 'no_document_response', CrawlStatus.FAILED);
     }
 
     const status = response.status();
@@ -530,11 +545,11 @@ async function fetchRenderedHtml(targetUrl: string, config: InternalCrawlerConfi
     const contentType = response.headers()['content-type'] || '';
 
     await assertSafeScrapeUrl(finalUrl, 'final URL');
-    assertSuccessfulHttpStatus(status, finalUrl);
+    assertSuccessfulHttpStatus(status, finalUrl, response.headers()['retry-after']);
 
     if (!isLikelyHtml(contentType, finalUrl)) {
       const downloaded = await fetchBufferSafely(finalUrl, { headers: sanitizeHeaders(config.auth?.headers) });
-      assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl);
+      assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl, downloaded.headers.get('retry-after'));
       const extracted = await extractFromBuffer(downloaded.buffer, downloaded.contentType || contentType, downloaded.finalUrl);
 
       return {
@@ -634,9 +649,15 @@ export const scrapeTarget = async (
     headers: sanitizeHeaders(config.auth?.headers),
   }).catch(() => null);
 
+  // Some API providers charge HEAD requests against the same quota. Avoid a
+  // second request when the probe already reports that the target is limited.
+  if (head?.status === 429) {
+    assertSuccessfulHttpStatus(head.status, head.finalUrl, head.headers.get('retry-after'));
+  }
+
   if (head && head.status < 400 && !isLikelyHtml(head.contentType, head.finalUrl)) {
     const downloaded = await fetchBufferSafely(head.finalUrl, { headers: sanitizeHeaders(config.auth?.headers) });
-    assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl);
+    assertSuccessfulHttpStatus(downloaded.status, downloaded.finalUrl, downloaded.headers.get('retry-after'));
     const extracted = await extractFromBuffer(downloaded.buffer, downloaded.contentType || head.contentType, downloaded.finalUrl);
 
     if (!extracted.content) {

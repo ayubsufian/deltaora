@@ -9,7 +9,7 @@ import { formatDateRelative } from '@deltaora/shared-utils';
 
 const crawlBadgeVariant = (status?: string) => {
   if (status === 'success') return 'success';
-  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported') return 'warning';
+  if (status === 'blocked' || status === 'auth_required' || status === 'unsupported' || status === 'rate_limited') return 'warning';
   if (status === 'failed') return 'destructive';
   return 'outline';
 };
